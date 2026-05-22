@@ -1,0 +1,6 @@
+aiogram==3.28.2
+sqlalchemy==2.0.49
+aiohttp==3.13.5
+python-dotenv==1.2.2
+matplotlib==3.10.9
+psycopg2-binary==2.9.12
