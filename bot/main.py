@@ -3,7 +3,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import BOT_TOKEN
-from bot.handlers import start, tests, history, checkin
+from bot.handlers import start, tests, history, checkin, charts
 from database.db import init_db
 
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +19,7 @@ async def main():
     dp.include_router(tests.router)
     dp.include_router(history.router)
     dp.include_router(checkin.router)
+    dp.include_router(charts.router)
 
     logging.info("Бот запущен!")
     await dp.start_polling(bot)
