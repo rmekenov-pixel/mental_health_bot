@@ -42,12 +42,16 @@ async def get_ai_explanation(test_name: str, score: int, level: str) -> str:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(GROQ_URL, headers=headers, json=payload) as response:
+                response_text = await response.text()
+                import logging
+                logging.error(f"Groq status: {response.status}, response: {response_text[:500]}")
                 if response.status == 200:
                     data = await response.json()
                     return data["choices"][0]["message"]["content"]
                 else:
-                    return "AI-объяснение временно недоступно."
+                    return f"Ошибка API: {response.status} - {response_text[:200]}"
     except Exception as e:
         import logging
         logging.error(f"Groq API error: {e}")
-        return f"AI-объяснение временно недоступно. Ошибка: {str(e)}"
+        return f"Ошибка соединения: {str(e)}"
+    
