@@ -4,3 +4,5 @@ aiohttp==3.13.5
 python-dotenv==1.2.2
 matplotlib==3.10.9
 psycopg2-binary==2.9.12
+aiosqlite==0.22.1
+asyncpg==0.31.0
