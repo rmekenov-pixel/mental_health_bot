@@ -6,6 +6,7 @@ from bot.keyboards.test_kb import get_test_choice_keyboard, get_answer_keyboard,
 from bot.services.scoring import get_test_questions, get_test_options, calculate_score, get_level
 from database.db import AsyncSessionLocal
 from database.models import TestResult
+from bot.services.ai_explanation import get_ai_explanation
 
 router = Router()
 
@@ -90,8 +91,14 @@ async def process_answer(message: Message, state: FSMContext):
             f"✅ <b>Тест завершён!</b>\n\n"
             f"📊 Результат: <b>{score} баллов</b>\n"
             f"📝 Уровень: <b>{level}</b>\n\n"
-            f"⚠️ Это не диагноз. Если вас беспокоит результат — "
-            f"обратитесь к специалисту.",
+            f"🤖 Получаю AI-объяснение...",
             parse_mode="HTML",
             reply_markup=get_main_keyboard()
+        )
+
+        explanation = await get_ai_explanation(test_name.upper(), score, level)
+        await message.answer(
+            f"💬 <b>AI-объяснение:</b>\n\n{explanation}\n\n"
+            f"⚠️ Это не диагноз. Если вас беспокоит результат — обратитесь к специалисту.",
+            parse_mode="HTML"
         )
