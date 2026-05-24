@@ -17,6 +17,7 @@ async def main():
 
     dp.include_router(start.router)
     dp.include_router(tests.router)
+    dp.include_router(history.router)
     dp.include_router(checkin.router)
 
     logging.info("Бот запущен!")
