@@ -47,5 +47,7 @@ async def get_ai_explanation(test_name: str, score: int, level: str) -> str:
                     return data["choices"][0]["message"]["content"]
                 else:
                     return "AI-объяснение временно недоступно."
-    except Exception:
-        return "AI-объяснение временно недоступно."
+    except Exception as e:
+        import logging
+        logging.error(f"Groq API error: {e}")
+        return f"AI-объяснение временно недоступно. Ошибка: {str(e)}"
