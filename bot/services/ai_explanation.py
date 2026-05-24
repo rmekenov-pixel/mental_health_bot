@@ -26,7 +26,7 @@ async def get_ai_explanation(test_name: str, score: int, level: str) -> str:
     }
 
     payload = {
-        "model": "llama3-8b-8192",
+        "model": "llama-3.3-70b-versatile",
         "messages": [
             {
                 "role": "system",
