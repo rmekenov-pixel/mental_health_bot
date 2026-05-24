@@ -6,8 +6,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 async def get_ai_explanation(test_name: str, score: int, level: str) -> str:
-    import logging
-    logging.error(f"GROQ_API_KEY value: {GROQ_API_KEY}")
+    
     if not GROQ_API_KEY:
         return f"GROQ_API_KEY не найден!"
 
