@@ -10,3 +10,5 @@ class CheckInStates(StatesGroup):
     mood = State()
     anxiety = State()
     energy = State()
+    sleep_hours = State()
+    sleep_quality = State()

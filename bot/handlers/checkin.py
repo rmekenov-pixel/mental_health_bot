@@ -72,6 +72,45 @@ async def checkin_energy(message: Message, state: FSMContext):
         await message.answer("Пожалуйста, введи цифру от 1 до 10.")
         return
 
+    await state.update_data(energy=energy)
+    await state.set_state(CheckInStates.sleep_hours)
+    await message.answer(
+        "😴 Сколько часов ты <b>спал</b> прошлой ночью?\n"
+        "Введи цифру от 1 до 12",
+        parse_mode="HTML"
+    )
+
+
+@router.message(CheckInStates.sleep_hours)
+async def checkin_sleep_hours(message: Message, state: FSMContext):
+    try:
+        hours = int(message.text)
+        if not 1 <= hours <= 12:
+            raise ValueError
+    except ValueError:
+        await message.answer("Пожалуйста, введи цифру от 1 до 12.")
+        return
+
+    await state.update_data(sleep_hours=hours)
+    await state.set_state(CheckInStates.sleep_quality)
+    await message.answer(
+        "🌙 Как ты оцениваешь <b>качество сна</b>?\n"
+        "Введи цифру от 1 до 10\n"
+        "(1 — очень плохо, 10 — отлично)",
+        parse_mode="HTML"
+    )
+
+
+@router.message(CheckInStates.sleep_quality)
+async def checkin_sleep_quality(message: Message, state: FSMContext):
+    try:
+        quality = int(message.text)
+        if not 1 <= quality <= 10:
+            raise ValueError
+    except ValueError:
+        await message.answer("Пожалуйста, введи цифру от 1 до 10.")
+        return
+
     data = await state.get_data()
     await state.clear()
 
@@ -80,21 +119,20 @@ async def checkin_energy(message: Message, state: FSMContext):
             telegram_id=message.from_user.id,
             mood=data["mood"],
             anxiety=data["anxiety"],
-            energy=energy
+            energy=data["energy"],
+            sleep_hours=data["sleep_hours"],
+            sleep_quality=quality
         )
         session.add(checkin)
         await session.commit()
 
-    mood = data["mood"]
-    anxiety = data["anxiety"]
-
     await message.answer(
         f"✅ <b>Чек-ин сохранён!</b>\n\n"
-        f"😊 Настроение: <b>{mood}/10</b>\n"
-        f"😰 Тревога: <b>{anxiety}/10</b>\n"
-        f"⚡ Энергия: <b>{energy}/10</b>\n\n"
-        f"Продолжай отслеживать своё состояние каждый день — "
-        f"это поможет увидеть динамику.",
+        f"😊 Настроение: <b>{data['mood']}/10</b>\n"
+        f"😰 Тревога: <b>{data['anxiety']}/10</b>\n"
+        f"⚡ Энергия: <b>{data['energy']}/10</b>\n"
+        f"😴 Сон: <b>{data['sleep_hours']} ч. / качество {quality}/10</b>\n\n"
+        f"Продолжай отслеживать своё состояние каждый день!",
         parse_mode="HTML",
         reply_markup=get_main_keyboard()
     )

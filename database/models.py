@@ -35,4 +35,6 @@ class CheckIn(Base):
     mood = Column(Integer, nullable=False)
     anxiety = Column(Integer, nullable=False)
     energy = Column(Integer, nullable=False)
+    sleep_hours = Column(Integer, nullable=True)
+    sleep_quality = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
