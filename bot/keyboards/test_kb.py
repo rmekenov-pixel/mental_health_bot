@@ -6,6 +6,7 @@ def get_test_choice_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📋 PHQ-9 (Депрессия)")],
             [KeyboardButton(text="😰 GAD-7 (Тревожность)")],
+            [KeyboardButton(text="🔥 Burnout (Выгорание)")],
         ],
         resize_keyboard=True
     )
@@ -13,6 +14,18 @@ def get_test_choice_keyboard() -> ReplyKeyboardMarkup:
 
 
 def get_answer_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Никогда (0)"), KeyboardButton(text="Очень редко (1)")],
+            [KeyboardButton(text="Редко (2)"), KeyboardButton(text="Иногда (3)")],
+            [KeyboardButton(text="Часто (4)"), KeyboardButton(text="Очень часто (5)")],
+            [KeyboardButton(text="Каждый день (6)")],
+        ],
+        resize_keyboard=True
+    )
+    return keyboard
+
+def get_phq_gad_keyboard() -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Совсем нет (0)")],
@@ -35,7 +48,6 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True
     )
     return keyboard
-
 
 def remove_keyboard() -> ReplyKeyboardRemove:
     return ReplyKeyboardRemove()

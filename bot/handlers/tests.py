@@ -2,24 +2,35 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from bot.states.test_states import TestStates
-from bot.keyboards.test_kb import get_test_choice_keyboard, get_answer_keyboard, get_main_keyboard
-from bot.services.scoring import get_test_questions, get_test_options, calculate_score, get_level
+from bot.keyboards.test_kb import get_test_choice_keyboard, get_answer_keyboard, get_phq_gad_keyboard, get_main_keyboard
+from bot.services.scoring import get_test_questions, calculate_score, get_level
+from bot.services.ai_explanation import get_ai_explanation
 from database.db import AsyncSessionLocal
 from database.models import TestResult
-from bot.services.ai_explanation import get_ai_explanation
 
 router = Router()
 
-ANSWER_MAP = {
+ANSWER_MAP_PHQ_GAD = {
     "Совсем нет (0)": 0,
     "Несколько дней (1)": 1,
     "Больше половины дней (2)": 2,
     "Почти каждый день (3)": 3,
 }
 
+ANSWER_MAP_BURNOUT = {
+    "Никогда (0)": 0,
+    "Очень редко (1)": 1,
+    "Редко (2)": 2,
+    "Иногда (3)": 3,
+    "Часто (4)": 4,
+    "Очень часто (5)": 5,
+    "Каждый день (6)": 6,
+}
+
 TEST_MAP = {
     "📋 PHQ-9 (Депрессия)": "phq9",
     "😰 GAD-7 (Тревожность)": "gad7",
+    "🔥 Burnout (Выгорание)": "burnout",
 }
 
 
@@ -47,30 +58,43 @@ async def start_test(message: Message, state: FSMContext):
         answers=[]
     )
     await state.set_state(TestStates.answering)
+
+    keyboard = get_phq_gad_keyboard() if test_key != "burnout" else get_answer_keyboard()
+
     await message.answer(
+        f"📋 <b>Оцени своё состояние за последние 2 недели.</b>\n\n"
         f"❓ Вопрос 1 из {len(questions)}:\n\n{questions[0]}",
-        reply_markup=get_answer_keyboard()
+        reply_markup=keyboard,
+        parse_mode="HTML"
     )
 
 
 @router.message(TestStates.answering)
 async def process_answer(message: Message, state: FSMContext):
-    answer_value = ANSWER_MAP.get(message.text)
+    data = await state.get_data()
+    test_name = data["test_name"]
+
+    if test_name == "burnout":
+        answer_map = ANSWER_MAP_BURNOUT
+        keyboard = get_answer_keyboard()
+    else:
+        answer_map = ANSWER_MAP_PHQ_GAD
+        keyboard = get_phq_gad_keyboard()
+
+    answer_value = answer_map.get(message.text)
     if answer_value is None:
         await message.answer("Пожалуйста, выбери один из вариантов ответа.")
         return
 
-    data = await state.get_data()
     answers = data["answers"] + [answer_value]
     current = data["current_question"] + 1
     questions = data["questions"]
-    test_name = data["test_name"]
 
     if current < len(questions):
         await state.update_data(answers=answers, current_question=current)
         await message.answer(
             f"❓ Вопрос {current + 1} из {len(questions)}:\n\n{questions[current]}",
-            reply_markup=get_answer_keyboard()
+            reply_markup=keyboard
         )
     else:
         score = calculate_score(answers)
