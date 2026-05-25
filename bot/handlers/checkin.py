@@ -4,7 +4,9 @@ from aiogram.fsm.context import FSMContext
 from bot.states.test_states import CheckInStates
 from bot.keyboards.test_kb import get_main_keyboard
 from database.db import AsyncSessionLocal
-from database.models import CheckIn
+from database.models import CheckIn, UserStreak
+from sqlalchemy import select
+from datetime import datetime, timedelta
 
 router = Router()
 
@@ -124,14 +126,51 @@ async def checkin_sleep_quality(message: Message, state: FSMContext):
             sleep_quality=quality
         )
         session.add(checkin)
+
+        # Обновляем streak
+        result = await session.execute(
+            select(UserStreak).where(UserStreak.telegram_id == message.from_user.id)
+        )
+        streak = result.scalar_one_or_none()
+        today = datetime.utcnow().date()
+
+        if not streak:
+            streak = UserStreak(
+                telegram_id=message.from_user.id,
+                current_streak=1,
+                longest_streak=1,
+                last_checkin_date=datetime.utcnow()
+            )
+            session.add(streak)
+        else:
+            if streak.last_checkin_date:
+                last_date = streak.last_checkin_date.date()
+                if last_date == today - timedelta(days=1):
+                    streak.current_streak += 1
+                elif last_date < today - timedelta(days=1):
+                    streak.current_streak = 1
+            else:
+                streak.current_streak = 1
+
+            if streak.current_streak > streak.longest_streak:
+                streak.longest_streak = streak.current_streak
+            streak.last_checkin_date = datetime.utcnow()
+
         await session.commit()
+
+    streak_text = ""
+    if streak.current_streak >= 3:
+        streak_text = f"\n\n🔥 <b>Streak: {streak.current_streak} дней подряд!</b>"
+    if streak.current_streak >= 7:
+        streak_text = f"\n\n🔥 <b>Неделя подряд! Streak: {streak.current_streak} дней!</b> 🎉"
 
     await message.answer(
         f"✅ <b>Чек-ин сохранён!</b>\n\n"
         f"😊 Настроение: <b>{data['mood']}/10</b>\n"
         f"😰 Тревога: <b>{data['anxiety']}/10</b>\n"
         f"⚡ Энергия: <b>{data['energy']}/10</b>\n"
-        f"😴 Сон: <b>{data['sleep_hours']} ч. / качество {quality}/10</b>\n\n"
+        f"😴 Сон: <b>{data['sleep_hours']} ч. / качество {quality}/10</b>"
+        f"{streak_text}\n\n"
         f"Продолжай отслеживать своё состояние каждый день!",
         parse_mode="HTML",
         reply_markup=get_main_keyboard()

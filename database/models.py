@@ -38,3 +38,13 @@ class CheckIn(Base):
     sleep_hours = Column(Integer, nullable=True)
     sleep_quality = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserStreak(Base):
+    __tablename__ = "streaks"
+
+    id = Column(Integer, primary_key=True)
+    telegram_id = Column(BigInteger, unique=True, nullable=False)
+    current_streak = Column(Integer, default=0)
+    longest_streak = Column(Integer, default=0)
+    last_checkin_date = Column(DateTime, nullable=True)
