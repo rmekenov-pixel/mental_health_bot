@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from bot.config import DATABASE_URL
 from database.models import Base
+from sqlalchemy import text
 
 # Для SQLite меняем префикс
 if DATABASE_URL.startswith("sqlite"):
@@ -19,7 +20,15 @@ AsyncSessionLocal = sessionmaker(
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
+        # Миграции для новых колонок
+        try:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN reminder_time VARCHAR DEFAULT '20:00'"))
+        except Exception:
+            pass
+        try:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN utc_offset INTEGER DEFAULT 5"))
+        except Exception:
+            pass
 
 async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:
