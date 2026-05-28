@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from bot.states.test_states import TestStates
-from bot.keyboards.test_kb import get_test_choice_keyboard, get_answer_keyboard, get_phq_gad_keyboard, get_main_keyboard
+from bot.keyboards.test_kb import get_test_choice_keyboard, get_answer_keyboard, get_phq_gad_keyboard, get_eq_keyboard, get_main_keyboard
 from bot.services.scoring import get_test_questions, calculate_score, get_level
 from bot.services.ai_explanation import get_ai_explanation
 from database.db import AsyncSessionLocal
@@ -27,10 +27,27 @@ ANSWER_MAP_BURNOUT = {
     "Каждый день (6)": 6,
 }
 
+ANSWER_MAP_EQ = {
+    "Совсем не согласен (1)": 1,
+    "Скорее не согласен (2)": 2,
+    "Нейтрально (3)": 3,
+    "Скорее согласен (4)": 4,
+    "Полностью согласен (5)": 5,
+}
+
+ANSWER_MAP_SELF_ESTEEM = {
+    "Полностью согласен (3)": 3,
+    "Согласен (2)": 2,
+    "Не согласен (1)": 1,
+    "Полностью не согласен (0)": 0,
+}
+
 TEST_MAP = {
     "📋 PHQ-9 (Депрессия)": "phq9",
     "😰 GAD-7 (Тревожность)": "gad7",
     "🔥 Burnout (Выгорание)": "burnout",
+    "💛 Самооценка": "self_esteem",
+    "🧠 Эмоциональный интеллект": "emotional_intelligence",
 }
 
 
@@ -59,9 +76,15 @@ async def start_test(message: Message, state: FSMContext):
     )
     await state.set_state(TestStates.answering)
 
-    keyboard = get_phq_gad_keyboard() if test_key != "burnout" else get_answer_keyboard()
+    if test_key == "burnout":
+        keyboard = get_answer_keyboard()
+    elif test_key in ["self_esteem", "emotional_intelligence"]:
+        keyboard = get_eq_keyboard()
+    else:
+        keyboard = get_phq_gad_keyboard()
 
-    await message.answer(
+    
+       await message.answer(
         f"📋 <b>Оцени своё состояние за последние 2 недели.</b>\n\n"
         f"❓ Вопрос 1 из {len(questions)}:\n\n{questions[0]}",
         reply_markup=keyboard,
@@ -77,6 +100,9 @@ async def process_answer(message: Message, state: FSMContext):
     if test_name == "burnout":
         answer_map = ANSWER_MAP_BURNOUT
         keyboard = get_answer_keyboard()
+    elif test_name in ["self_esteem", "emotional_intelligence"]:
+        answer_map = ANSWER_MAP_EQ if test_name == "emotional_intelligence" else ANSWER_MAP_SELF_ESTEEM
+        keyboard = get_eq_keyboard()
     else:
         answer_map = ANSWER_MAP_PHQ_GAD
         keyboard = get_phq_gad_keyboard()

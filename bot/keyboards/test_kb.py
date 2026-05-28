@@ -7,6 +7,8 @@ def get_test_choice_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📋 PHQ-9 (Депрессия)")],
             [KeyboardButton(text="😰 GAD-7 (Тревожность)")],
             [KeyboardButton(text="🔥 Burnout (Выгорание)")],
+            [KeyboardButton(text="💛 Самооценка")],
+            [KeyboardButton(text="🧠 Эмоциональный интеллект")],
         ],
         resize_keyboard=True
     )
@@ -32,6 +34,19 @@ def get_phq_gad_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="Несколько дней (1)")],
             [KeyboardButton(text="Больше половины дней (2)")],
             [KeyboardButton(text="Почти каждый день (3)")],
+        ],
+        resize_keyboard=True
+    )
+    return keyboard
+
+def get_eq_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Совсем не согласен (1)")],
+            [KeyboardButton(text="Скорее не согласен (2)")],
+            [KeyboardButton(text="Нейтрально (3)")],
+            [KeyboardButton(text="Скорее согласен (4)")],
+            [KeyboardButton(text="Полностью согласен (5)")],
         ],
         resize_keyboard=True
     )
