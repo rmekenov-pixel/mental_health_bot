@@ -5,7 +5,7 @@ from bot.states.test_states import CheckInStates
 from bot.keyboards.test_kb import get_main_keyboard
 from database.db import AsyncSessionLocal
 from database.models import CheckIn, UserStreak
-from sqlalchemy import select
+from sqlalchemy import select, func
 from datetime import datetime, timedelta
 
 router = Router()
@@ -161,8 +161,28 @@ async def checkin_sleep_quality(message: Message, state: FSMContext):
     streak_text = ""
     if streak.current_streak >= 3:
         streak_text = f"\n\n🔥 <b>Streak: {streak.current_streak} дней подряд!</b>"
-    if streak.current_streak >= 7:
-        streak_text = f"\n\n🔥 <b>Неделя подряд! Streak: {streak.current_streak} дней!</b> 🎉"
+    if streak.current_streak == 7:
+        streak_text = f"\n\n🏅 <b>Milestone: Неделя подряд!</b> Так держать! 🎉"
+    if streak.current_streak == 30:
+        streak_text = f"\n\n🏆 <b>Milestone: Месяц подряд!</b> Ты невероятен! 🎊"
+    elif streak.current_streak > 7:
+        streak_text = f"\n\n🔥 <b>Streak: {streak.current_streak} дней подряд!</b>"
+
+    # Milestone по общему количеству чек-инов
+    async with AsyncSessionLocal() as session:
+        total_checkins = await session.execute(
+            select(func.count(CheckIn.id)).where(CheckIn.telegram_id == message.from_user.id)
+        )
+        total = total_checkins.scalar()
+
+    if total == 1:
+        streak_text += f"\n\n🎯 <b>Первый чек-ин!</b> Отличное начало!"
+    elif total == 10:
+        streak_text += f"\n\n⭐ <b>10 чек-инов!</b> Ты формируешь привычку!"
+    elif total == 50:
+        streak_text += f"\n\n💎 <b>50 чек-инов!</b> Это уже серьёзно!"
+    elif total == 100:
+        streak_text += f"\n\n👑 <b>100 чек-инов!</b> Легенда заботы о себе!"
 
     await message.answer(
         f"✅ <b>Чек-ин сохранён!</b>\n\n"
