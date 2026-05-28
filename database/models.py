@@ -13,8 +13,9 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     telegram_id = Column(BigInteger, unique=True, nullable=False)
     username = Column(String, nullable=True)
+    reminder_time = Column(String, nullable=True, default="20:00")
+    utc_offset = Column(Integer, nullable=True, default=5)
     created_at = Column(DateTime, default=datetime.utcnow)
-
 
 class TestResult(Base):
     __tablename__ = "test_results"

@@ -12,3 +12,7 @@ class CheckInStates(StatesGroup):
     energy = State()
     sleep_hours = State()
     sleep_quality = State()
+
+
+class ReminderStates(StatesGroup):
+    waiting_time = State()

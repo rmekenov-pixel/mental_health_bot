@@ -9,12 +9,26 @@ from datetime import datetime, timedelta
 
 
 async def send_checkin_reminder(bot: Bot):
+    from datetime import datetime, timedelta
+    current_hour = datetime.utcnow().hour
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(User))
         users = result.scalars().all()
 
     for user in users:
         try:
+            reminder_time = user.reminder_time or "20:00"
+            hour, minute = map(int, reminder_time.split(":"))
+            
+            # Конвертируем локальное время пользователя в UTC
+            # Используем offset из профиля или дефолт UTC+5
+            utc_offset = user.utc_offset or 5
+            utc_hour = (hour - utc_offset) % 24
+
+            if utc_hour != current_hour:
+                continue
+
             async with AsyncSessionLocal() as session:
                 today = datetime.utcnow().date()
                 result = await session.execute(
@@ -27,8 +41,8 @@ async def send_checkin_reminder(bot: Bot):
             if not checkin_today:
                 await bot.send_message(
                     user.telegram_id,
-                    "🔔 <b>Вечерний чек-ин</b>\n\n"
-                    "Как прошёл твой день? Не забудь отметить своё состояние!\n\n"
+                    "🔔 <b>Напоминание о чек-ине</b>\n\n"
+                    "Не забудь отметить своё состояние сегодня!\n\n"
                     "Нажми ✅ Чек-ин",
                     parse_mode="HTML"
                 )
@@ -110,14 +124,14 @@ async def send_weekly_report(bot: Bot):
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
 
-    # Каждый день в 20:00 по Астане (UTC+5 = 15:00 UTC)
+    # Каждый час проверяем у кого сейчас время напоминания
     scheduler.add_job(
         send_checkin_reminder,
-        CronTrigger(hour=15, minute=0),
+        CronTrigger(minute=0),
         args=[bot]
     )
 
-    # Каждое воскресенье в 19:00 по Астане (UTC+5 = 14:00 UTC)
+    # Каждое воскресенье в 19:00 по Астане
     scheduler.add_job(
         send_weekly_report,
         CronTrigger(day_of_week="sun", hour=14, minute=0),
