@@ -126,29 +126,65 @@ async def process_answer(message: Message, state: FSMContext):
         score = calculate_score(answers)
         level = get_level(test_name, score)
 
-        async with AsyncSessionLocal() as session:
-            result = TestResult(
-                telegram_id=message.from_user.id,
-                test_name=test_name.upper(),
-                score=score,
-                level=level
+        if test_name == "burnout":
+            from bot.services.scoring import calculate_burnout_scores
+            burnout = calculate_burnout_scores(answers)
+            async with AsyncSessionLocal() as session:
+                result = TestResult(
+                    telegram_id=message.from_user.id,
+                    test_name="BURNOUT",
+                    score=burnout["total"],
+                    level=f"ЭИ:{burnout['ee_level']} | ДП:{burnout['dp_level']} | ЛД:{burnout['pa_level']}"
+                )
+                session.add(result)
+                await session.commit()
+
+            await state.clear()
+            await message.answer(
+                f"✅ <b>Тест на выгорание завершён!</b>\n\n"
+                f"🔥 <b>Эмоциональное истощение:</b> {burnout['emotional_exhaustion']} баллов\n"
+                f"📊 Уровень: {burnout['ee_level']}\n\n"
+                f"😶 <b>Деперсонализация:</b> {burnout['depersonalization']} баллов\n"
+                f"📊 Уровень: {burnout['dp_level']}\n\n"
+                f"⭐ <b>Личные достижения:</b> {burnout['personal_achievement']} баллов\n"
+                f"📊 Уровень: {burnout['pa_level']}\n\n"
+                f"🤖 Получаю AI-объяснение...",
+                parse_mode="HTML",
+                reply_markup=get_main_keyboard()
             )
-            session.add(result)
-            await session.commit()
+            explanation = await get_ai_explanation(
+                "BURNOUT",
+                burnout["total"],
+                f"Истощение: {burnout['ee_level']}, Деперсонализация: {burnout['dp_level']}, Достижения: {burnout['pa_level']}"
+            )
+            await message.answer(
+                f"💬 <b>AI-объяснение:</b>\n\n{explanation}\n\n"
+                f"⚠️ Это не диагноз. Если вас беспокоит результат — обратитесь к специалисту.",
+                parse_mode="HTML"
+            )
+        else:
+            async with AsyncSessionLocal() as session:
+                result = TestResult(
+                    telegram_id=message.from_user.id,
+                    test_name=test_name.upper(),
+                    score=score,
+                    level=level
+                )
+                session.add(result)
+                await session.commit()
 
-        await state.clear()
-        await message.answer(
-            f"✅ <b>Тест завершён!</b>\n\n"
-            f"📊 Результат: <b>{score} баллов</b>\n"
-            f"📝 Уровень: <b>{level}</b>\n\n"
-            f"🤖 Получаю AI-объяснение...",
-            parse_mode="HTML",
-            reply_markup=get_main_keyboard()
-        )
-
-        explanation = await get_ai_explanation(test_name.upper(), score, level)
-        await message.answer(
-            f"💬 <b>AI-объяснение:</b>\n\n{explanation}\n\n"
-            f"⚠️ Это не диагноз. Если вас беспокоит результат — обратитесь к специалисту.",
-            parse_mode="HTML"
-        )
+            await state.clear()
+            await message.answer(
+                f"✅ <b>Тест завершён!</b>\n\n"
+                f"📊 Результат: <b>{score} баллов</b>\n"
+                f"📝 Уровень: <b>{level}</b>\n\n"
+                f"🤖 Получаю AI-объяснение...",
+                parse_mode="HTML",
+                reply_markup=get_main_keyboard()
+            )
+            explanation = await get_ai_explanation(test_name.upper(), score, level)
+            await message.answer(
+                f"💬 <b>AI-объяснение:</b>\n\n{explanation}\n\n"
+                f"⚠️ Это не диагноз. Если вас беспокоит результат — обратитесь к специалисту.",
+                parse_mode="HTML"
+            )
