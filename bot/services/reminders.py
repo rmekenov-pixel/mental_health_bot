@@ -88,6 +88,21 @@ async def send_weekly_report(bot: Bot):
 
             await bot.send_message(user.telegram_id, text, parse_mode="HTML")
 
+            # AI анализ недели
+            if checkins:
+                from bot.services.ai_explanation import get_ai_weekly_reflection
+                reflection = await get_ai_weekly_reflection(
+                    avg_mood=avg_mood,
+                    avg_anxiety=avg_anxiety,
+                    avg_energy=avg_energy,
+                    checkin_count=len(checkins)
+                )
+                await bot.send_message(
+                    user.telegram_id,
+                    f"🧠 <b>AI-анализ твоей недели:</b>\n\n{reflection}",
+                    parse_mode="HTML"
+                )
+
         except Exception as e:
             logging.error(f"Weekly report error for {user.telegram_id}: {e}")
 
