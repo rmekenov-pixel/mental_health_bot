@@ -48,3 +48,13 @@ class UserStreak(Base):
     current_streak = Column(Integer, default=0)
     longest_streak = Column(Integer, default=0)
     last_checkin_date = Column(DateTime, nullable=True)
+
+
+class Feedback(Base):
+    __tablename__ = "feedback"
+
+    id = Column(Integer, primary_key=True)
+    telegram_id = Column(BigInteger, nullable=False)
+    rating = Column(String, nullable=False)  # "positive" или "negative"
+    comment = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

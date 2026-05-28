@@ -84,7 +84,7 @@ async def start_test(message: Message, state: FSMContext):
         keyboard = get_phq_gad_keyboard()
 
     
-       await message.answer(
+    await message.answer(
         f"📋 <b>Оцени своё состояние за последние 2 недели.</b>\n\n"
         f"❓ Вопрос 1 из {len(questions)}:\n\n{questions[0]}",
         reply_markup=keyboard,
