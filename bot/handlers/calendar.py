@@ -76,4 +76,4 @@ async def show_calendar(message: Message):
     calendar_text += f"\n📊 За 30 дней: {total} чек-инов\n"
     calendar_text += f"🟩 Хороших: {good} | 🟨 Средних: {medium} | 🟥 Тяжёлых: {bad}"
 
-    await message.answer(calendar_text, parse_mode="HTML", reply_markup=get_main_keyboard())
+    await message.answer(f"<pre>{calendar_text}</pre>", parse_mode="HTML", reply_markup=get_main_keyboard())
