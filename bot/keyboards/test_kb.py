@@ -58,7 +58,7 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="🧪 Пройти тест")],
             [KeyboardButton(text="📊 Моя история"), KeyboardButton(text="✅ Чек-ин")],
-            [KeyboardButton(text="📈 График")],
+            [KeyboardButton(text="📈 График"), KeyboardButton(text="💬 Обратная связь")],
         ],
         resize_keyboard=True
     )

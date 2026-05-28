@@ -3,7 +3,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import BOT_TOKEN
-from bot.handlers import start, tests, history, checkin, charts
+from bot.handlers import start, tests, history, checkin, charts, feedback
 from bot.services.reminders import setup_scheduler
 from database.db import init_db
 
@@ -21,6 +21,7 @@ async def main():
     dp.include_router(history.router)
     dp.include_router(checkin.router)
     dp.include_router(charts.router)
+    dp.include_router(feedback.router)
 
     scheduler = setup_scheduler(bot)
     scheduler.start()
