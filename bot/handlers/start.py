@@ -13,6 +13,7 @@ router = Router()
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
+    await state.clear()
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User).where(User.telegram_id == message.from_user.id)
@@ -45,7 +46,7 @@ async def cmd_start(message: Message, state: FSMContext):
                 reply_markup=get_main_keyboard(),
                 parse_mode="HTML"
             )
-
+            
 
 @router.message(ReminderStates.waiting_time)
 async def set_reminder_time(message: Message, state: FSMContext):
