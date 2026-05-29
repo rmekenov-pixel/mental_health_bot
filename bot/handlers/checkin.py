@@ -13,6 +13,7 @@ router = Router()
 
 @router.message(F.text == "✅ Чек-ин")
 async def start_checkin(message: Message, state: FSMContext):
+    await state.clear()
     await state.set_state(CheckInStates.mood)
     await message.answer(
         "✅ <b>Ежедневный чек-ин</b>\n\n"

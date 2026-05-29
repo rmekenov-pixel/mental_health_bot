@@ -54,6 +54,7 @@ TEST_MAP = {
 
 @router.message(F.text == "🧪 Пройти тест")
 async def choose_test(message: Message, state: FSMContext):
+    await state.clear()
     await state.set_state(TestStates.choosing_test)
     await message.answer(
         "Выбери тест:",
