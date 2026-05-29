@@ -53,6 +53,19 @@ def get_eq_keyboard() -> ReplyKeyboardMarkup:
     return keyboard
 
 
+def get_self_esteem_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Полностью согласен (3)")],
+            [KeyboardButton(text="Согласен (2)")],
+            [KeyboardButton(text="Не согласен (1)")],
+            [KeyboardButton(text="Полностью не согласен (0)")],
+        ],
+        resize_keyboard=True
+    )
+    return keyboard
+
+
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardMarkup(
         keyboard=[

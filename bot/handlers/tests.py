@@ -2,11 +2,12 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from bot.states.test_states import TestStates
-from bot.keyboards.test_kb import get_test_choice_keyboard, get_answer_keyboard, get_phq_gad_keyboard, get_eq_keyboard, get_main_keyboard
+ffrom bot.keyboards.test_kb import get_test_choice_keyboard, get_answer_keyboard, get_phq_gad_keyboard, get_eq_keyboard, get_self_esteem_keyboard, get_main_keyboard
 from bot.services.scoring import get_test_questions, calculate_score, get_level
 from bot.services.ai_explanation import get_ai_explanation
 from database.db import AsyncSessionLocal
 from database.models import TestResult
+
 
 router = Router()
 
@@ -78,11 +79,12 @@ async def start_test(message: Message, state: FSMContext):
 
     if test_key == "burnout":
         keyboard = get_answer_keyboard()
-    elif test_key in ["self_esteem", "emotional_intelligence"]:
+    elif test_key == "emotional_intelligence":
         keyboard = get_eq_keyboard()
+    elif test_key == "self_esteem":
+        keyboard = get_self_esteem_keyboard()
     else:
         keyboard = get_phq_gad_keyboard()
-
     
     await message.answer(
         f"📋 <b>Оцени своё состояние за последние 2 недели.</b>\n\n"
@@ -100,12 +102,15 @@ async def process_answer(message: Message, state: FSMContext):
     if test_name == "burnout":
         answer_map = ANSWER_MAP_BURNOUT
         keyboard = get_answer_keyboard()
-    elif test_name in ["self_esteem", "emotional_intelligence"]:
-        answer_map = ANSWER_MAP_EQ if test_name == "emotional_intelligence" else ANSWER_MAP_SELF_ESTEEM
+    elif test_name == "emotional_intelligence":
+        answer_map = ANSWER_MAP_EQ
         keyboard = get_eq_keyboard()
+    elif test_name == "self_esteem":
+        answer_map = ANSWER_MAP_SELF_ESTEEM
+        keyboard = get_self_esteem_keyboard()
     else:
         answer_map = ANSWER_MAP_PHQ_GAD
-        keyboard = get_phq_gad_keyboard()
+        keyboard = get_phq_gad_keyboard())
 
     answer_value = answer_map.get(message.text)
     if answer_value is None:
