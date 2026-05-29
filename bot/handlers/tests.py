@@ -110,7 +110,7 @@ async def process_answer(message: Message, state: FSMContext):
         keyboard = get_self_esteem_keyboard()
     else:
         answer_map = ANSWER_MAP_PHQ_GAD
-        keyboard = get_phq_gad_keyboard())
+        keyboard = get_phq_gad_keyboard()
 
     answer_value = answer_map.get(message.text)
     if answer_value is None:
