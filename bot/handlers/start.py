@@ -31,14 +31,20 @@ async def cmd_start(message: Message, state: FSMContext):
 
             await message.answer(
                 f"👋 Привет, {message.from_user.first_name}!\n\n"
-                "Я помогу тебе отслеживать своё психологическое состояние.\n\n"
-                "⚠️ <b>Важно:</b> Этот бот не является медицинским инструментом "
-                "и не заменяет консультацию специалиста.\n\n"
-                "🔔 В какое время присылать напоминание о чек-ине?\n"
-                "Напиши в формате ЧЧ:ММ, например: <b>09:00</b> или <b>21:30</b>",
-                parse_mode="HTML"
+                f"Большинство людей замечают эмоциональное выгорание слишком поздно.\n\n"
+                f"🧠 <b>MindCheck помогает отслеживать:</b>\n"
+                f"— тревожность\n"
+                f"— стресс\n"
+                f"— сон\n"
+                f"— настроение\n"
+                f"— уровень энергии\n\n"
+                f"📊 Чем дольше пользуешься ботом, тем точнее видишь свои эмоциональные паттерны и изменения состояния.\n\n"
+                f"🤖 AI поможет понять результаты тестов простым языком.\n\n"
+                f"⚠️ Бот не ставит диагнозы и не заменяет специалиста.\n\n"
+                f"Начнём с короткого теста 👇",
+                parse_mode="HTML",
+                reply_markup=get_main_keyboard()
             )
-            await state.set_state(ReminderStates.waiting_time)
         else:
             await message.answer(
                 f"👋 Привет, {message.from_user.first_name}!\n\n"
@@ -46,7 +52,7 @@ async def cmd_start(message: Message, state: FSMContext):
                 reply_markup=get_main_keyboard(),
                 parse_mode="HTML"
             )
-            
+
 
 @router.message(ReminderStates.waiting_time)
 async def set_reminder_time(message: Message, state: FSMContext):
