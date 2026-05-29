@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from bot.states.test_states import TestStates
-ffrom bot.keyboards.test_kb import get_test_choice_keyboard, get_answer_keyboard, get_phq_gad_keyboard, get_eq_keyboard, get_self_esteem_keyboard, get_main_keyboard
+from bot.keyboards.test_kb import get_test_choice_keyboard, get_answer_keyboard, get_phq_gad_keyboard, get_eq_keyboard, get_self_esteem_keyboard, get_main_keyboard
 from bot.services.scoring import get_test_questions, calculate_score, get_level
 from bot.services.ai_explanation import get_ai_explanation
 from database.db import AsyncSessionLocal
