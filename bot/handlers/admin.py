@@ -17,38 +17,31 @@ async def admin_panel(message: Message):
         return
 
     async with AsyncSessionLocal() as session:
-        # Всего пользователей
         total_users = await session.execute(select(func.count(User.id)))
         total_users = total_users.scalar()
 
-        # Новых за 7 дней
         week_ago = datetime.utcnow() - timedelta(days=7)
         new_users = await session.execute(
             select(func.count(User.id)).where(User.created_at >= week_ago)
         )
         new_users = new_users.scalar()
 
-        # Всего тестов
         total_tests = await session.execute(select(func.count(TestResult.id)))
         total_tests = total_tests.scalar()
 
-        # Тестов за 7 дней
         recent_tests = await session.execute(
             select(func.count(TestResult.id)).where(TestResult.created_at >= week_ago)
         )
         recent_tests = recent_tests.scalar()
 
-        # Всего чек-инов
         total_checkins = await session.execute(select(func.count(CheckIn.id)))
         total_checkins = total_checkins.scalar()
 
-        # Чек-инов за 7 дней
         recent_checkins = await session.execute(
             select(func.count(CheckIn.id)).where(CheckIn.created_at >= week_ago)
         )
         recent_checkins = recent_checkins.scalar()
 
-        # Фидбэк
         positive = await session.execute(
             select(func.count(Feedback.id)).where(Feedback.rating == "positive")
         )
@@ -59,7 +52,6 @@ async def admin_panel(message: Message):
         )
         negative = negative.scalar()
 
-        # Популярные тесты
         popular = await session.execute(
             select(TestResult.test_name, func.count(TestResult.id).label("cnt"))
             .group_by(TestResult.test_name)
@@ -67,9 +59,26 @@ async def admin_panel(message: Message):
         )
         popular = popular.all()
 
+        comments_result = await session.execute(
+            select(Feedback)
+            .where(Feedback.rating == "negative")
+            .where(Feedback.comment.isnot(None))
+            .order_by(Feedback.created_at.desc())
+            .limit(5)
+        )
+        comments = comments_result.scalars().all()
+
     popular_text = ""
     for name, cnt in popular:
         popular_text += f"  • {name}: {cnt}\n"
+
+    comments_text = ""
+    if comments:
+        for c in comments:
+            date = c.created_at.strftime("%d.%m")
+            comments_text += f"  • {date}: {c.comment}\n"
+    else:
+        comments_text = "  Нет отзывов пока\n"
 
     await message.answer(
         f"📊 <b>Админ-панель MindCheck</b>\n\n"
@@ -85,6 +94,7 @@ async def admin_panel(message: Message):
         f"💬 <b>Фидбэк:</b>\n"
         f"  👍 Полезно: {positive}\n"
         f"  👎 Не полезно: {negative}\n\n"
-        f"🏆 <b>Популярные тесты:</b>\n{popular_text}",
+        f"🏆 <b>Популярные тесты:</b>\n{popular_text}\n"
+        f"💬 <b>Последние негативные отзывы:</b>\n{comments_text}",
         parse_mode="HTML"
     )
