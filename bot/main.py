@@ -20,18 +20,9 @@ MAIN_MENU_BUTTONS = [
 class ResetStateMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         state = data.get("state")
-        if state:
-            current = await state.get_state()
-            # Сбрасываем только если не в активном тесте или чек-ине
-            if current in ["CheckInStates:mood", "CheckInStates:anxiety", 
-                          "CheckInStates:energy", "CheckInStates:sleep_hours",
-                          "CheckInStates:sleep_quality", "TestStates:answering",
-                          "TestStates:choosing_test", "ReminderStates:waiting_time"]:
-                # Проверяем что сообщение не является числом или вариантом ответа
-                if hasattr(event, 'text') and event.text and not event.text[0].isdigit():
-                    # Если текст начинается с эмодзи (кнопка меню) — сбрасываем
-                    if ord(event.text[0]) > 127:
-                        await state.clear()
+        if state and hasattr(event, 'text') and event.text:
+            if event.text in MAIN_MENU_BUTTONS:
+                await state.clear()
         return await handler(event, data)
 
 
