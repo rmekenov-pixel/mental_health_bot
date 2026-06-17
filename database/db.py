@@ -29,6 +29,10 @@ async def init_db():
             await conn.execute(text("ALTER TABLE users ADD COLUMN utc_offset INTEGER DEFAULT 5"))
         except Exception:
             pass
+        try:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN language VARCHAR DEFAULT 'ru'"))
+        except Exception:
+            pass
 
 async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:

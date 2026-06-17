@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.types import TelegramObject
 from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import BOT_TOKEN
-from bot.handlers import start, tests, history, checkin, charts, feedback, admin, calendar
+from bot.handlers import start, tests, history, checkin, charts, feedback, admin, calendar, language
 from bot.services.reminders import setup_scheduler
 from database.db import init_db
 from typing import Callable, Dict, Any, Awaitable
@@ -42,6 +42,7 @@ async def main():
     dp.include_router(feedback.router)
     dp.include_router(admin.router)
     dp.include_router(calendar.router)
+    dp.include_router(language.router)
 
     scheduler = setup_scheduler(bot)
     scheduler.start()

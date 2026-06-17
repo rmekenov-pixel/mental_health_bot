@@ -7,6 +7,8 @@ from database.models import User
 from sqlalchemy import select
 from bot.keyboards.test_kb import get_main_keyboard
 from bot.states.test_states import ReminderStates
+from bot.services.localization import t, get_user_lang
+from bot.handlers.language import get_language_keyboard, LANG_MAP
 
 router = Router()
 
@@ -24,31 +26,20 @@ async def cmd_start(message: Message, state: FSMContext):
             new_user = User(
                 telegram_id=message.from_user.id,
                 username=message.from_user.username,
-                reminder_time="20:00"
+                reminder_time="20:00",
+                language="ru"
             )
             session.add(new_user)
             await session.commit()
 
             await message.answer(
-                f"👋 Привет, {message.from_user.first_name}!\n\n"
-                f"Большинство людей замечают эмоциональное выгорание слишком поздно.\n\n"
-                f"🧠 <b>MindCheck помогает отслеживать:</b>\n"
-                f"— тревожность\n"
-                f"— стресс\n"
-                f"— сон\n"
-                f"— настроение\n"
-                f"— уровень энергии\n\n"
-                f"📊 Чем дольше пользуешься ботом, тем точнее видишь свои эмоциональные паттерны и изменения состояния.\n\n"
-                f"🤖 AI поможет понять результаты тестов простым языком.\n\n"
-                f"⚠️ Бот не ставит диагнозы и не заменяет специалиста.\n\n"
-                f"Начнём с короткого теста 👇",
-                parse_mode="HTML",
-                reply_markup=get_main_keyboard()
+                "🌍 Выбери язык / Тілді таңдаңыз / Choose language:",
+                reply_markup=get_language_keyboard()
             )
         else:
+            lang = user.language or "ru"
             await message.answer(
-                f"👋 Привет, {message.from_user.first_name}!\n\n"
-                "Выбери действие:",
+                t(lang, "start_existing", name=message.from_user.first_name),
                 reply_markup=get_main_keyboard(),
                 parse_mode="HTML"
             )
@@ -57,6 +48,7 @@ async def cmd_start(message: Message, state: FSMContext):
 @router.message(ReminderStates.waiting_time)
 async def set_reminder_time(message: Message, state: FSMContext):
     time_text = message.text.strip()
+    lang = await get_user_lang(message.from_user.id)
 
     try:
         parts = time_text.split(":")
@@ -66,12 +58,9 @@ async def set_reminder_time(message: Message, state: FSMContext):
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             raise ValueError
     except ValueError:
-        await message.answer(
-            "❌ Неверный формат. Напиши время в формате ЧЧ:ММ, например: 09:00 или 21:30"
-        )
+        await message.answer(t(lang, "reminder_invalid"))
         return
 
-    # Определяем UTC offset автоматически
     from datetime import datetime
     utc_now = datetime.utcnow()
     utc_offset = hour - utc_now.hour
@@ -92,8 +81,7 @@ async def set_reminder_time(message: Message, state: FSMContext):
 
     await state.clear()
     await message.answer(
-        f"✅ Буду напоминать о чек-ине в <b>{time_text}</b> каждый день.\n\n"
-        f"Выбери действие:",
+        t(lang, "reminder_set", time=time_text),
         parse_mode="HTML",
         reply_markup=get_main_keyboard()
     )
@@ -101,26 +89,19 @@ async def set_reminder_time(message: Message, state: FSMContext):
 
 @router.message(Command("reminder"))
 async def change_reminder(message: Message, state: FSMContext):
+    lang = await get_user_lang(message.from_user.id)
     await state.set_state(ReminderStates.waiting_time)
     await message.answer(
-        "🔔 В какое время присылать напоминание?\n"
-        "Напиши в формате ЧЧ:ММ, например: <b>09:00</b> или <b>21:30</b>",
+        t(lang, "reminder_ask"),
         parse_mode="HTML"
     )
 
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
+    lang = await get_user_lang(message.from_user.id)
     await message.answer(
-        "📌 <b>Что я умею:</b>\n\n"
-        "🧪 <b>Пройти тест</b> — PHQ-9, GAD-7, Burnout, Самооценка, EQ\n"
-        "📊 <b>Моя история</b> — результаты прошлых тестов\n"
-        "✅ <b>Чек-ин</b> — ежедневная оценка состояния\n"
-        "📈 <b>График</b> — динамика за 7 дней\n"
-        "🔍 <b>Инсайты</b> — персональные корреляции\n"
-        "📅 <b>Календарь</b> — эмоциональный календарь за 30 дней\n\n"
-        "/reminder — изменить время напоминания\n\n"
-        "⚠️ Бот не ставит диагнозы и не заменяет врача.",
+        t(lang, "help"),
         parse_mode="HTML",
         reply_markup=get_main_keyboard()
     )

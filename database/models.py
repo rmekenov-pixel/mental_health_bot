@@ -15,6 +15,7 @@ class User(Base):
     username = Column(String, nullable=True)
     reminder_time = Column(String, nullable=True, default="20:00")
     utc_offset = Column(Integer, nullable=True, default=5)
+    language = Column(String, nullable=True, default="ru")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class TestResult(Base):
