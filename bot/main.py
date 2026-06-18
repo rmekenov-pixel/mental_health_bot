@@ -26,8 +26,14 @@ class ResetStateMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         state = data.get("state")
         if state and hasattr(event, 'text') and event.text:
+            # Сбрасываем при кнопках меню
             if event.text in MAIN_MENU_BUTTONS:
                 await state.clear()
+            # Сбрасываем при командах кроме /start (он сам сбрасывает)
+            elif event.text.startswith('/') and event.text != '/start':
+                current = await state.get_state()
+                if current and 'ReminderStates' in current:
+                    await state.clear()
         return await handler(event, data)
 
 
