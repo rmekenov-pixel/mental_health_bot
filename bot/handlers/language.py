@@ -39,6 +39,7 @@ async def choose_language(message: Message):
 
 @router.message(F.text.in_(LANG_MAP.keys()))
 async def set_language(message: Message, state: FSMContext):
+    await state.clear()
     lang = LANG_MAP[message.text]
 
     async with AsyncSessionLocal() as session:
@@ -46,24 +47,28 @@ async def set_language(message: Message, state: FSMContext):
             select(User).where(User.telegram_id == message.from_user.id)
         )
         user = result.scalar_one_or_none()
+        is_new_user = False
         if user:
             user.language = lang
             await session.commit()
-            is_new = user.reminder_time == "20:00" and not user.utc_offset
-
+            is_new_user = user.utc_offset is None
+        
     from bot.keyboards.test_kb import get_main_keyboard
     from bot.states.test_states import ReminderStates
 
     await message.answer(
-        t(lang, "start_new", name=message.from_user.first_name),
+        t(lang, "start_new" if is_new_user else "start_existing", 
+          name=message.from_user.first_name),
         parse_mode="HTML",
         reply_markup=get_main_keyboard()
     )
-    await message.answer(
-        t(lang, "reminder_ask"),
-        parse_mode="HTML"
-    )
-    await state.set_state(ReminderStates.waiting_time)
+    
+    if is_new_user:
+        await message.answer(
+            t(lang, "reminder_ask"),
+            parse_mode="HTML"
+        )
+        await state.set_state(ReminderStates.waiting_time)
 
     from bot.keyboards.test_kb import get_main_keyboard
     await message.answer(
