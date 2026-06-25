@@ -20,19 +20,20 @@ AsyncSessionLocal = sessionmaker(
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Миграции для новых колонок
+
+    migrations = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_time VARCHAR DEFAULT '20:00'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS utc_offset INTEGER DEFAULT 5",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR DEFAULT 'ru'",
+    ]
+
+    for migration in migrations:
         try:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN reminder_time VARCHAR DEFAULT '20:00'"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN utc_offset INTEGER DEFAULT 5"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN language VARCHAR DEFAULT 'ru'"))
-        except Exception:
-            pass
+            async with engine.begin() as conn:
+                await conn.execute(text(migration))
+        except Exception as e:
+            import logging
+            logging.error(f"Migration failed: {migration} - {e}")
 
 async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:
