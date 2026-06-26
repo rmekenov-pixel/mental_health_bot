@@ -33,14 +33,14 @@ async def cmd_start(message: Message, state: FSMContext):
             await session.commit()
 
             await message.answer(
-                "🌍 Выбери язык / Тілді таңдаңыз / Choose language:",
+                t("ru", "choose_language"),
                 reply_markup=get_language_keyboard()
             )
         else:
             lang = user.language or "ru"
             await message.answer(
                 t(lang, "start_existing", name=message.from_user.first_name),
-                reply_markup=get_main_keyboard(),
+                reply_markup=get_main_keyboard(lang),
                 parse_mode="HTML"
             )
 
@@ -83,7 +83,7 @@ async def set_reminder_time(message: Message, state: FSMContext):
     await message.answer(
         t(lang, "reminder_set", time=time_text),
         parse_mode="HTML",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(lang)
     )
 
 
@@ -103,5 +103,5 @@ async def cmd_help(message: Message):
     await message.answer(
         t(lang, "help"),
         parse_mode="HTML",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(lang)
     )

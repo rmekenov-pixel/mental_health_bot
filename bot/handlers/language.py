@@ -32,7 +32,7 @@ LANG_MAP = {
 @router.message(Command("language"))
 async def choose_language(message: Message):
     await message.answer(
-        "🌍 Выбери язык / Тілді таңдаңыз / Choose language:",
+        t("ru", "choose_language"),
         reply_markup=get_language_keyboard()
     )
 
@@ -60,7 +60,7 @@ async def set_language(message: Message, state: FSMContext):
         t(lang, "start_new" if is_new_user else "start_existing", 
           name=message.from_user.first_name),
         parse_mode="HTML",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(lang)
     )
     
     if is_new_user:
@@ -69,10 +69,3 @@ async def set_language(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
         await state.set_state(ReminderStates.waiting_time)
-
-    from bot.keyboards.test_kb import get_main_keyboard
-    await message.answer(
-        t(lang, "start_existing", name=message.from_user.first_name),
-        parse_mode="HTML",
-        reply_markup=get_main_keyboard()
-    )

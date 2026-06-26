@@ -1,0 +1,28 @@
+{
+  "name": "PHQ-9",
+  "description": "Depression questionnaire",
+  "questions": [
+    "Little interest or pleasure in doing things",
+    "Feeling down, depressed, or hopeless",
+    "Trouble falling or staying asleep, or sleeping too much",
+    "Feeling tired or having little energy",
+    "Poor appetite or overeating",
+    "Feeling bad about yourself, or that you are a failure, or have let your family down",
+    "Trouble concentrating on things",
+    "Moving or speaking slowly, or being fidgety/restless",
+    "Thoughts that you would be better off dead, or of hurting yourself"
+  ],
+  "options": [
+    "Not at all (0)",
+    "Several days (1)",
+    "More than half the days (2)",
+    "Nearly every day (3)"
+  ],
+  "scoring": {
+    "0-4": "Minimal depression",
+    "5-9": "Mild depression",
+    "10-14": "Moderate depression",
+    "15-19": "Moderately severe depression",
+    "20-27": "Severe depression"
+  }
+}

@@ -6,20 +6,30 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import BOT_TOKEN
 from bot.handlers import start, tests, history, checkin, charts, feedback, admin, calendar, language
 from bot.services.reminders import setup_scheduler
+from bot.services.localization import load_locale
 from database.db import init_db
 from typing import Callable, Dict, Any, Awaitable
 
 logging.basicConfig(level=logging.INFO)
 
-MAIN_MENU_BUTTONS = [
-    "🧪 Пройти тест", "📊 Моя история", "✅ Чек-ин",
-    "📈 График", "🔍 Инсайты", "📅 Календарь", "💬 Обратная связь",
-    "🧪 Take a test", "📊 My history", "✅ Check-in",
-    "📈 Chart", "🔍 Insights", "📅 Calendar", "💬 Feedback",
-    "🧪 Тест өту", "📊 Менің тарихым", "✅ Чек-ин",
-    "📈 График", "🔍 Инсайттар", "📅 Күнтізбе", "💬 Кері байланыс",
-    "🇷🇺 Русский", "🇰🇿 Қазақша", "🇬🇧 English"
+# Built from the locale files instead of being hardcoded, so it always stays
+# in sync with whatever button text lives in locales/*.json — including the
+# test-choice buttons (PHQ-9, GAD-7, etc.), which also need a state reset.
+_MENU_BUTTON_KEYS = [
+    "btn_test", "btn_history", "btn_checkin", "btn_chart",
+    "btn_insights", "btn_calendar", "btn_feedback",
+    "test_btn_phq9", "test_btn_gad7", "test_btn_burnout",
+    "test_btn_self_esteem", "test_btn_eq",
 ]
+
+MAIN_MENU_BUTTONS = []
+for _lang in ("ru", "kz", "en"):
+    _locale = load_locale(_lang)
+    for _key in _MENU_BUTTON_KEYS:
+        if _key in _locale:
+            MAIN_MENU_BUTTONS.append(_locale[_key])
+
+MAIN_MENU_BUTTONS += ["🇷🇺 Русский", "🇰🇿 Қазақша", "🇬🇧 English"]
 
 
 class ResetStateMiddleware(BaseMiddleware):

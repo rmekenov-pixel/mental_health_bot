@@ -2,74 +2,73 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from bot.states.test_states import TestStates
-from bot.keyboards.test_kb import get_test_choice_keyboard, get_answer_keyboard, get_phq_gad_keyboard, get_eq_keyboard, get_self_esteem_keyboard, get_main_keyboard
-from bot.services.scoring import get_test_questions, calculate_score, get_level
+from bot.keyboards.test_kb import get_test_choice_keyboard, get_options_keyboard, get_main_keyboard
+from bot.services.scoring import get_test_questions, get_test_options, calculate_score, get_level, calculate_burnout_scores
 from bot.services.ai_explanation import get_ai_explanation
+from bot.services.localization import t, get_user_lang
 from database.db import AsyncSessionLocal
 from database.models import TestResult
 
 
 router = Router()
 
-ANSWER_MAP_PHQ_GAD = {
-    "Совсем нет (0)": 0,
-    "Несколько дней (1)": 1,
-    "Больше половины дней (2)": 2,
-    "Почти каждый день (3)": 3,
-}
-
-ANSWER_MAP_BURNOUT = {
-    "Никогда (0)": 0,
-    "Очень редко (1)": 1,
-    "Редко (2)": 2,
-    "Иногда (3)": 3,
-    "Часто (4)": 4,
-    "Очень часто (5)": 5,
-    "Каждый день (6)": 6,
-}
-
-ANSWER_MAP_EQ = {
-    "Совсем не согласен (1)": 1,
-    "Скорее не согласен (2)": 2,
-    "Нейтрально (3)": 3,
-    "Скорее согласен (4)": 4,
-    "Полностью согласен (5)": 5,
-}
-
-ANSWER_MAP_SELF_ESTEEM = {
-    "Полностью согласен (3)": 3,
-    "Согласен (2)": 2,
-    "Не согласен (1)": 1,
-    "Полностью не согласен (0)": 0,
-}
-
-TEST_MAP = {
-    "📋 PHQ-9 (Депрессия)": "phq9",
-    "😰 GAD-7 (Тревожность)": "gad7",
-    "🔥 Burnout (Выгорание)": "burnout",
-    "💛 Самооценка": "self_esteem",
-    "🧠 Эмоциональный интеллект": "emotional_intelligence",
+# Maps the localized test-choice button text (per language) to the internal
+# test key. Built dynamically from locale files so it never drifts from the
+# button text shown in get_test_choice_keyboard().
+_TEST_BTN_KEYS = {
+    "test_btn_phq9": "phq9",
+    "test_btn_gad7": "gad7",
+    "test_btn_burnout": "burnout",
+    "test_btn_self_esteem": "self_esteem",
+    "test_btn_eq": "emotional_intelligence",
 }
 
 
-@router.message(F.text == "🧪 Пройти тест")
+def _build_test_map() -> dict:
+    from bot.services.localization import load_locale
+    test_map = {}
+    for lang in ("ru", "kz", "en"):
+        locale = load_locale(lang)
+        for btn_key, test_key in _TEST_BTN_KEYS.items():
+            if btn_key in locale:
+                test_map[locale[btn_key]] = test_key
+    return test_map
+
+
+TEST_MAP = _build_test_map()
+
+# Test display names per language, used for the TestResult.test_name field
+# and for prompting the AI explanation.
+TEST_DISPLAY_NAMES = {
+    "phq9": "PHQ-9",
+    "gad7": "GAD-7",
+    "burnout": "BURNOUT",
+    "self_esteem": "SELF-ESTEEM",
+    "emotional_intelligence": "EQ",
+}
+
+
+@router.message(F.text.in_({t(lang, "btn_test") for lang in ("ru", "kz", "en")}))
 async def choose_test(message: Message, state: FSMContext):
+    lang = await get_user_lang(message.from_user.id)
     await state.clear()
     await state.set_state(TestStates.choosing_test)
     await message.answer(
-        "Выбери тест:",
-        reply_markup=get_test_choice_keyboard()
+        t(lang, "choose_test"),
+        reply_markup=get_test_choice_keyboard(lang)
     )
 
 
 @router.message(TestStates.choosing_test)
 async def start_test(message: Message, state: FSMContext):
+    lang = await get_user_lang(message.from_user.id)
     test_key = TEST_MAP.get(message.text)
     if not test_key:
-        await message.answer("Пожалуйста, выбери тест из списка.")
+        await message.answer(t(lang, "choose_test_invalid"))
         return
 
-    questions = get_test_questions(test_key)
+    questions = get_test_questions(test_key, lang)
+    options = get_test_options(test_key, lang)
     await state.update_data(
         test_name=test_key,
         questions=questions,
@@ -78,18 +77,17 @@ async def start_test(message: Message, state: FSMContext):
     )
     await state.set_state(TestStates.answering)
 
-    if test_key == "burnout":
-        keyboard = get_answer_keyboard()
-    elif test_key == "emotional_intelligence":
-        keyboard = get_eq_keyboard()
-    elif test_key == "self_esteem":
-        keyboard = get_self_esteem_keyboard()
-    else:
-        keyboard = get_phq_gad_keyboard()
-    
+    keyboard = get_options_keyboard(options)
+
+    intro = t(
+        lang, "test_intro",
+        current=1, total=len(questions), question=questions[0]
+    )
+    if lang == "kz":
+        intro = t(lang, "kz_validation_disclaimer_intro") + intro
+
     await message.answer(
-        f"📋 <b>Оцени своё состояние за последние 2 недели.</b>\n\n"
-        f"❓ Вопрос 1 из {len(questions)}:\n\n{questions[0]}",
+        intro,
         reply_markup=keyboard,
         parse_mode="HTML"
     )
@@ -97,100 +95,98 @@ async def start_test(message: Message, state: FSMContext):
 
 @router.message(TestStates.answering)
 async def process_answer(message: Message, state: FSMContext):
+    lang = await get_user_lang(message.from_user.id)
     data = await state.get_data()
     test_name = data["test_name"]
+    questions = data["questions"]
 
-    if test_name == "burnout":
-        answer_map = ANSWER_MAP_BURNOUT
-        keyboard = get_answer_keyboard()
-    elif test_name == "emotional_intelligence":
-        answer_map = ANSWER_MAP_EQ
-        keyboard = get_eq_keyboard()
-    elif test_name == "self_esteem":
-        answer_map = ANSWER_MAP_SELF_ESTEEM
-        keyboard = get_self_esteem_keyboard()
-    else:
-        answer_map = ANSWER_MAP_PHQ_GAD
-        keyboard = get_phq_gad_keyboard()
+    options = get_test_options(test_name, lang)
+    keyboard = get_options_keyboard(options)
 
-    answer_value = answer_map.get(message.text)
-    if answer_value is None:
-        await message.answer("Пожалуйста, выбери один из вариантов ответа.")
+    try:
+        answer_value = options.index(message.text)
+    except ValueError:
+        await message.answer(t(lang, "test_invalid"))
         return
 
     answers = data["answers"] + [answer_value]
     current = data["current_question"] + 1
-    questions = data["questions"]
 
     if current < len(questions):
         await state.update_data(answers=answers, current_question=current)
         await message.answer(
-            f"❓ Вопрос {current + 1} из {len(questions)}:\n\n{questions[current]}",
+            t(lang, "test_question", current=current + 1, total=len(questions), question=questions[current]),
             reply_markup=keyboard
+        )
+        return
+
+    display_name = TEST_DISPLAY_NAMES.get(test_name, test_name.upper())
+
+    if test_name == "burnout":
+        burnout = calculate_burnout_scores(answers, lang)
+        async with AsyncSessionLocal() as session:
+            result = TestResult(
+                telegram_id=message.from_user.id,
+                test_name="BURNOUT",
+                score=burnout["total"],
+                level=f"ЭИ:{burnout['ee_level']} | ДП:{burnout['dp_level']} | ЛД:{burnout['pa_level']}"
+            )
+            session.add(result)
+            await session.commit()
+
+        await state.clear()
+
+        done_text = t(
+            lang, "burnout_done",
+            ee=burnout["emotional_exhaustion"], ee_level=burnout["ee_level"],
+            dp=burnout["depersonalization"], dp_level=burnout["dp_level"],
+            pa=burnout["personal_achievement"], pa_level=burnout["pa_level"]
+        )
+        if lang == "kz":
+            done_text += t(lang, "kz_validation_disclaimer_result")
+
+        await message.answer(
+            done_text,
+            parse_mode="HTML",
+            reply_markup=get_main_keyboard(lang)
+        )
+        explanation = await get_ai_explanation(
+            display_name,
+            burnout["total"],
+            f"Истощение: {burnout['ee_level']}, Деперсонализация: {burnout['dp_level']}, Достижения: {burnout['pa_level']}",
+            lang
+        )
+        await message.answer(
+            t(lang, "ai_explanation", text=explanation),
+            parse_mode="HTML"
         )
     else:
         score = calculate_score(answers)
-        level = get_level(test_name, score)
+        level = get_level(test_name, score, lang)
 
-        if test_name == "burnout":
-            from bot.services.scoring import calculate_burnout_scores
-            burnout = calculate_burnout_scores(answers)
-            async with AsyncSessionLocal() as session:
-                result = TestResult(
-                    telegram_id=message.from_user.id,
-                    test_name="BURNOUT",
-                    score=burnout["total"],
-                    level=f"ЭИ:{burnout['ee_level']} | ДП:{burnout['dp_level']} | ЛД:{burnout['pa_level']}"
-                )
-                session.add(result)
-                await session.commit()
+        async with AsyncSessionLocal() as session:
+            result = TestResult(
+                telegram_id=message.from_user.id,
+                test_name=display_name,
+                score=score,
+                level=level
+            )
+            session.add(result)
+            await session.commit()
 
-            await state.clear()
-            await message.answer(
-                f"✅ <b>Тест на выгорание завершён!</b>\n\n"
-                f"🔥 <b>Эмоциональное истощение:</b> {burnout['emotional_exhaustion']} баллов\n"
-                f"📊 Уровень: {burnout['ee_level']}\n\n"
-                f"😶 <b>Деперсонализация:</b> {burnout['depersonalization']} баллов\n"
-                f"📊 Уровень: {burnout['dp_level']}\n\n"
-                f"⭐ <b>Личные достижения:</b> {burnout['personal_achievement']} баллов\n"
-                f"📊 Уровень: {burnout['pa_level']}\n\n"
-                f"🤖 Получаю AI-объяснение...",
-                parse_mode="HTML",
-                reply_markup=get_main_keyboard()
-            )
-            explanation = await get_ai_explanation(
-                "BURNOUT",
-                burnout["total"],
-                f"Истощение: {burnout['ee_level']}, Деперсонализация: {burnout['dp_level']}, Достижения: {burnout['pa_level']}"
-            )
-            await message.answer(
-                f"💬 <b>AI-объяснение:</b>\n\n{explanation}\n\n"
-                f"⚠️ Это не диагноз. Если вас беспокоит результат — обратитесь к специалисту.",
-                parse_mode="HTML"
-            )
-        else:
-            async with AsyncSessionLocal() as session:
-                result = TestResult(
-                    telegram_id=message.from_user.id,
-                    test_name=test_name.upper(),
-                    score=score,
-                    level=level
-                )
-                session.add(result)
-                await session.commit()
+        await state.clear()
 
-            await state.clear()
-            await message.answer(
-                f"✅ <b>Тест завершён!</b>\n\n"
-                f"📊 Результат: <b>{score} баллов</b>\n"
-                f"📝 Уровень: <b>{level}</b>\n\n"
-                f"🤖 Получаю AI-объяснение...",
-                parse_mode="HTML",
-                reply_markup=get_main_keyboard()
-            )
-            explanation = await get_ai_explanation(test_name.upper(), score, level)
-            await message.answer(
-                f"💬 <b>AI-объяснение:</b>\n\n{explanation}\n\n"
-                f"⚠️ Это не диагноз. Если вас беспокоит результат — обратитесь к специалисту.",
-                parse_mode="HTML"
-            )
+        done_text = t(lang, "test_done", score=score, level=level)
+        if lang == "kz":
+            done_text += t(lang, "kz_validation_disclaimer_result")
+
+        await message.answer(
+            done_text,
+            parse_mode="HTML",
+            reply_markup=get_main_keyboard(lang)
+        )
+        explanation = await get_ai_explanation(display_name, score, level, lang)
+        await message.answer(
+            t(lang, "ai_explanation", text=explanation),
+            parse_mode="HTML"
+        )

@@ -1,0 +1,84 @@
+{
+    "name": "Burnout",
+    "description": "Burnout test (MBI)",
+    "questions": [
+        "I feel emotionally drained from my work",
+        "I feel used up at the end of the workday",
+        "I feel fatigued when I get up in the morning and have to face another day on the job",
+        "I can easily understand how the people around me feel",
+        "I feel I treat some people as if they were impersonal objects",
+        "Working with people all day is really a strain for me",
+        "I deal very effectively with the problems that arise in my work",
+        "I feel burned out from my work",
+        "I feel I'm positively influencing other people's lives through my work",
+        "I've become more callous toward people since I started this job",
+        "I worry that this job is hardening me emotionally",
+        "I feel very energetic",
+        "I feel frustrated by my job",
+        "I feel I'm working too hard on my job",
+        "I don't really care what happens to some people",
+        "Working with people directly puts too much stress on me",
+        "I can easily create a relaxed atmosphere with the people around me",
+        "I feel exhilarated after working closely with others",
+        "I have accomplished many worthwhile things in this job",
+        "I feel like I'm at the end of my rope",
+        "In my work, I deal with emotional problems very calmly",
+        "I feel people blame me for some of their problems"
+    ],
+    "options": [
+        "Never (0)",
+        "Very rarely (1)",
+        "Rarely (2)",
+        "Sometimes (3)",
+        "Often (4)",
+        "Very often (5)",
+        "Every day (6)"
+    ],
+    "subscales": {
+        "emotional_exhaustion": [
+            0,
+            1,
+            2,
+            5,
+            7,
+            12,
+            13,
+            15,
+            19
+        ],
+        "depersonalization": [
+            4,
+            9,
+            10,
+            14,
+            21
+        ],
+        "personal_achievement": [
+            3,
+            6,
+            8,
+            11,
+            16,
+            17,
+            18,
+            20
+        ]
+    },
+    "scoring": {
+        "emotional_exhaustion": {
+            "0-16": "Low exhaustion",
+            "17-26": "Moderate exhaustion",
+            "27-54": "High exhaustion"
+        },
+        "depersonalization": {
+            "0-6": "Low depersonalization",
+            "7-12": "Moderate depersonalization",
+            "13-30": "High depersonalization"
+        },
+        "personal_achievement": {
+            "0-31": "Low personal achievement",
+            "32-38": "Moderate personal achievement",
+            "39-48": "High personal achievement"
+        }
+    }
+}

@@ -1,0 +1,28 @@
+{
+    "name": "EQ",
+    "description": "Emotional intelligence express test",
+    "questions": [
+        "I easily recognize other people's emotions from their face and voice",
+        "I understand why I have certain emotions",
+        "I can control my emotions in stressful situations",
+        "I know how to calm another person down when they feel bad",
+        "I notice changes in the mood of people around me",
+        "I can accurately put into words what I feel",
+        "My emotions don't get in the way of making important decisions",
+        "I easily find common ground with people of different personalities",
+        "I understand how my words affect other people's mood",
+        "I know how to use my mood to help reach my goals"
+    ],
+    "options": [
+        "Strongly disagree (1)",
+        "Somewhat disagree (2)",
+        "Neutral (3)",
+        "Somewhat agree (4)",
+        "Strongly agree (5)"
+    ],
+    "scoring": {
+        "10-20": "Low EQ — room to grow",
+        "21-35": "Medium EQ — good foundation",
+        "36-50": "High EQ — strong emotional competence"
+    }
+}

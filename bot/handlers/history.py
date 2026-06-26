@@ -4,14 +4,16 @@ from database.db import AsyncSessionLocal
 from database.models import TestResult
 from sqlalchemy import select
 from bot.keyboards.test_kb import get_main_keyboard
+from bot.services.localization import t, get_user_lang
 import logging
 from bot.services.insights import get_correlation_insights
 
 router = Router()
 
 
-@router.message(F.text == "📊 Моя история")
+@router.message(F.text.in_({t(lang, "btn_history") for lang in ("ru", "kz", "en")}))
 async def show_history(message: Message):
+    lang = await get_user_lang(message.from_user.id)
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -24,40 +26,38 @@ async def show_history(message: Message):
 
         if not results:
             await message.answer(
-                "📭 У тебя пока нет результатов.\n\nПройди первый тест!",
-                reply_markup=get_main_keyboard()
+                t(lang, "no_results"),
+                reply_markup=get_main_keyboard(lang)
             )
             return
 
-        text = "📊 <b>Твои последние результаты:</b>\n\n"
+        text = t(lang, "history_title")
         for r in results:
             date = r.created_at.strftime("%d.%m.%Y")
-            text += f"📅 {date} | {r.test_name} | {r.score} баллов | {r.level}\n"
+            text += t(lang, "history_line", date=date, test_name=r.test_name, score=r.score, level=r.level)
 
-        await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
+        await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard(lang))
 
     except Exception as e:
         logging.error(f"History error: {e}")
-        await message.answer(f"Ошибка: {str(e)}", reply_markup=get_main_keyboard())
+        await message.answer(f"Ошибка: {str(e)}", reply_markup=get_main_keyboard(lang))
 
 
 
-@router.message(F.text == "🔍 Инсайты")
+@router.message(F.text.in_({t(lang, "btn_insights") for lang in ("ru", "kz", "en")}))
 async def show_insights(message: Message):
-    insights = await get_correlation_insights(message.from_user.id)
+    lang = await get_user_lang(message.from_user.id)
+    insights = await get_correlation_insights(message.from_user.id, lang)
 
     if not insights:
         await message.answer(
-            "📊 Пока недостаточно данных для анализа.\n\n"
-            "Делай чек-ин каждый день — через 5-7 дней появятся персональные инсайты!",
-            reply_markup=get_main_keyboard()
+            t(lang, "no_insights"),
+            reply_markup=get_main_keyboard(lang)
         )
         return
 
     await message.answer(
-        f"🔍 <b>Персональные инсайты</b>\n\n"
-        f"На основе твоих данных за последние 30 дней:\n\n"
-        f"{insights}",
+        t(lang, "insights_title") + t(lang, "insights_subtitle") + insights,
         parse_mode="HTML",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(lang)
     )

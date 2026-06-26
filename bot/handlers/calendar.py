@@ -5,12 +5,14 @@ from database.models import CheckIn
 from sqlalchemy import select
 from datetime import datetime, timedelta
 from bot.keyboards.test_kb import get_main_keyboard
+from bot.services.localization import t, get_user_lang
 
 router = Router()
 
 
-@router.message(F.text == "📅 Календарь")
+@router.message(F.text.in_({t(lang, "btn_calendar") for lang in ("ru", "kz", "en")}))
 async def show_calendar(message: Message):
+    lang = await get_user_lang(message.from_user.id)
     async with AsyncSessionLocal() as session:
         month_ago = datetime.utcnow() - timedelta(days=30)
         result = await session.execute(
@@ -23,9 +25,8 @@ async def show_calendar(message: Message):
 
     if not checkins:
         await message.answer(
-            "📅 Пока нет данных для календаря.\n\n"
-            "Делай чек-ин каждый день — и увидишь свой эмоциональный календарь!",
-            reply_markup=get_main_keyboard()
+            t(lang, "no_calendar"),
+            reply_markup=get_main_keyboard(lang)
         )
         return
 
@@ -35,11 +36,10 @@ async def show_calendar(message: Message):
         checkin_by_date[date] = c.mood
 
     today = datetime.utcnow().date()
-    calendar_text = "📅 <b>Эмоциональный календарь (30 дней)</b>\n\n"
-    calendar_text += "🟩 хорошо (7-10)  🟨 средне (4-6)  🟥 тяжело (1-3)\n\n"
+    calendar_text = t(lang, "calendar_title")
+    calendar_text += t(lang, "calendar_legend")
 
-    week_days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    calendar_text += " ".join(week_days) + "\n"
+    calendar_text += t(lang, "calendar_weekdays") + "\n"
 
     start_date = today - timedelta(days=29)
     first_weekday = start_date.weekday()
@@ -73,7 +73,6 @@ async def show_calendar(message: Message):
     medium = sum(1 for m in checkin_by_date.values() if 4 <= m < 7)
     bad = sum(1 for m in checkin_by_date.values() if m < 4)
 
-    calendar_text += f"\n📊 За 30 дней: {total} чек-инов\n"
-    calendar_text += f"🟩 Хороших: {good} | 🟨 Средних: {medium} | 🟥 Тяжёлых: {bad}"
+    calendar_text += t(lang, "calendar_stats", total=total, good=good, medium=medium, bad=bad)
 
-    await message.answer(f"<pre>{calendar_text}</pre>", parse_mode="HTML", reply_markup=get_main_keyboard())
+    await message.answer(f"<pre>{calendar_text}</pre>", parse_mode="HTML", reply_markup=get_main_keyboard(lang))

@@ -1,0 +1,27 @@
+{
+    "name": "Self-Esteem",
+    "description": "Self-esteem test (Rosenberg scale)",
+    "questions": [
+        "On the whole, I am satisfied with myself",
+        "At times I think I am no good at all",
+        "I feel that I have a number of good qualities",
+        "I am able to do things as well as most other people",
+        "I feel I do not have much to be proud of",
+        "I certainly feel useless at times",
+        "I feel that I'm a person of worth, at least on an equal plane with others",
+        "I wish I could have more respect for myself",
+        "All in all, I am inclined to feel that I am a failure",
+        "I take a positive attitude toward myself"
+    ],
+    "options": [
+        "Strongly agree (3)",
+        "Agree (2)",
+        "Disagree (1)",
+        "Strongly disagree (0)"
+    ],
+    "scoring": {
+        "0-14": "Low self-esteem",
+        "15-21": "Medium self-esteem",
+        "22-30": "High self-esteem"
+    }
+}

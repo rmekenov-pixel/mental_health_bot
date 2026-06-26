@@ -2,10 +2,16 @@ from database.db import AsyncSessionLocal
 from database.models import CheckIn, TestResult
 from sqlalchemy import select
 from datetime import datetime, timedelta
-from bot.services.ai_explanation import get_ai_weekly_reflection
+from bot.services.localization import t
+
+_LANG_NAMES = {
+    "ru": "русском",
+    "kz": "казахском",
+    "en": "English",
+}
 
 
-async def get_correlation_insights(telegram_id: int) -> str:
+async def get_correlation_insights(telegram_id: int, lang: str = "ru") -> str:
     async with AsyncSessionLocal() as session:
         month_ago = datetime.utcnow() - timedelta(days=30)
         result = await session.execute(
@@ -43,11 +49,11 @@ async def get_correlation_insights(telegram_id: int) -> str:
         avg_older = sum(c.mood for c in older) / len(older)
         diff = avg_recent - avg_older
         if diff > 0.5:
-            mood_trend = f"улучшилось на {diff:.1f} балла за последние дни"
+            mood_trend = t(lang, "insights_mood_improved", diff=f"{diff:.1f}")
         elif diff < -0.5:
-            mood_trend = f"снизилось на {abs(diff):.1f} балла за последние дни"
+            mood_trend = t(lang, "insights_mood_declined", diff=f"{abs(diff):.1f}")
         else:
-            mood_trend = "стабильное"
+            mood_trend = t(lang, "insights_mood_stable")
 
     # Корреляции сна
     sleep_insight = ""
@@ -59,19 +65,21 @@ async def get_correlation_insights(telegram_id: int) -> str:
             avg_anxiety_good = sum(c.anxiety for c in good_sleep) / len(good_sleep)
             diff = avg_anxiety_bad - avg_anxiety_good
             if diff > 0.5:
-                sleep_insight = f"при коротком сне тревога выше на {diff:.1f} балла"
+                sleep_insight = t(lang, "insights_sleep_anxiety_link", diff=f"{diff:.1f}")
 
     # Последние тесты
     test_summary = ""
     if tests:
-        test_summary = ", ".join(f"{t.test_name}: {t.score} ({t.level})" for t in tests[:3])
+        test_summary = ", ".join(f"{tr.test_name}: {tr.score} ({tr.level})" for tr in tests[:3])
 
     # Передаём всё в AI для развёрнутого анализа
     from bot.config import GROQ_API_KEY
     import aiohttp
 
     if not GROQ_API_KEY:
-        return _build_basic_insights(checkins, avg_mood, avg_anxiety, avg_energy, avg_sleep, mood_trend, sleep_insight)
+        return _build_basic_insights(avg_mood, avg_anxiety, avg_energy, avg_sleep, mood_trend, sleep_insight, lang)
+
+    lang_name = _LANG_NAMES.get(lang, _LANG_NAMES["ru"])
 
     prompt = f"""Проанализируй психологическое состояние пользователя за последние {len(checkins)} дней.
 
@@ -91,7 +99,7 @@ async def get_correlation_insights(telegram_id: int) -> str:
 4. 2-3 конкретные рекомендации основанные на данных
 5. Одно ободряющее слово
 
-Пиши тепло, конкретно, без медицинских терминов. На русском языке."""
+Пиши тепло, конкретно, без медицинских терминов. На {lang_name} языке."""
 
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -117,18 +125,18 @@ async def get_correlation_insights(telegram_id: int) -> str:
     except Exception:
         pass
 
-    return _build_basic_insights(checkins, avg_mood, avg_anxiety, avg_energy, avg_sleep, mood_trend, sleep_insight)
+    return _build_basic_insights(avg_mood, avg_anxiety, avg_energy, avg_sleep, mood_trend, sleep_insight, lang)
 
 
-def _build_basic_insights(checkins, avg_mood, avg_anxiety, avg_energy, avg_sleep, mood_trend, sleep_insight):
+def _build_basic_insights(avg_mood, avg_anxiety, avg_energy, avg_sleep, mood_trend, sleep_insight, lang: str = "ru"):
     lines = []
-    lines.append(f"😊 Среднее настроение: {avg_mood:.1f}/10")
-    lines.append(f"😰 Средняя тревога: {avg_anxiety:.1f}/10")
-    lines.append(f"⚡ Средняя энергия: {avg_energy:.1f}/10")
+    lines.append(t(lang, "insights_basic_mood", avg_mood=f"{avg_mood:.1f}"))
+    lines.append(t(lang, "insights_basic_anxiety", avg_anxiety=f"{avg_anxiety:.1f}"))
+    lines.append(t(lang, "insights_basic_energy", avg_energy=f"{avg_energy:.1f}"))
     if avg_sleep:
-        lines.append(f"😴 Средний сон: {avg_sleep:.1f} ч.")
+        lines.append(t(lang, "insights_basic_sleep", avg_sleep=f"{avg_sleep:.1f}"))
     if mood_trend:
-        lines.append(f"📈 Настроение {mood_trend}")
+        lines.append(t(lang, "insights_basic_mood_trend", trend=mood_trend))
     if sleep_insight:
         lines.append(f"🔗 {sleep_insight}")
     return "\n".join(f"• {l}" for l in lines)

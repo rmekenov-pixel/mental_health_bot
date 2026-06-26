@@ -1,78 +1,41 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from bot.services.localization import t
 
 
-def get_test_choice_keyboard() -> ReplyKeyboardMarkup:
+def get_test_choice_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📋 PHQ-9 (Депрессия)")],
-            [KeyboardButton(text="😰 GAD-7 (Тревожность)")],
-            [KeyboardButton(text="🔥 Burnout (Выгорание)")],
-            [KeyboardButton(text="💛 Самооценка")],
-            [KeyboardButton(text="🧠 Эмоциональный интеллект")],
+            [KeyboardButton(text=t(lang, "test_btn_phq9"))],
+            [KeyboardButton(text=t(lang, "test_btn_gad7"))],
+            [KeyboardButton(text=t(lang, "test_btn_burnout"))],
+            [KeyboardButton(text=t(lang, "test_btn_self_esteem"))],
+            [KeyboardButton(text=t(lang, "test_btn_eq"))],
         ],
         resize_keyboard=True
     )
     return keyboard
 
 
-def get_answer_keyboard() -> ReplyKeyboardMarkup:
+def get_options_keyboard(options: list[str]) -> ReplyKeyboardMarkup:
+    """Builds a reply keyboard from a test's options list (one button per row,
+    or two per row if there are many short options). Options come straight
+    from the test JSON file for the given language, so the button text always
+    matches the language of the questions."""
+    rows = [[KeyboardButton(text=option)] for option in options]
     keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Никогда (0)"), KeyboardButton(text="Очень редко (1)")],
-            [KeyboardButton(text="Редко (2)"), KeyboardButton(text="Иногда (3)")],
-            [KeyboardButton(text="Часто (4)"), KeyboardButton(text="Очень часто (5)")],
-            [KeyboardButton(text="Каждый день (6)")],
-        ],
-        resize_keyboard=True
-    )
-    return keyboard
-
-def get_phq_gad_keyboard() -> ReplyKeyboardMarkup:
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Совсем нет (0)")],
-            [KeyboardButton(text="Несколько дней (1)")],
-            [KeyboardButton(text="Больше половины дней (2)")],
-            [KeyboardButton(text="Почти каждый день (3)")],
-        ],
-        resize_keyboard=True
-    )
-    return keyboard
-
-def get_eq_keyboard() -> ReplyKeyboardMarkup:
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Совсем не согласен (1)")],
-            [KeyboardButton(text="Скорее не согласен (2)")],
-            [KeyboardButton(text="Нейтрально (3)")],
-            [KeyboardButton(text="Скорее согласен (4)")],
-            [KeyboardButton(text="Полностью согласен (5)")],
-        ],
+        keyboard=rows,
         resize_keyboard=True
     )
     return keyboard
 
 
-def get_self_esteem_keyboard() -> ReplyKeyboardMarkup:
+def get_main_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Полностью согласен (3)")],
-            [KeyboardButton(text="Согласен (2)")],
-            [KeyboardButton(text="Не согласен (1)")],
-            [KeyboardButton(text="Полностью не согласен (0)")],
-        ],
-        resize_keyboard=True
-    )
-    return keyboard
-
-
-def get_main_keyboard() -> ReplyKeyboardMarkup:
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🧪 Пройти тест")],
-            [KeyboardButton(text="📊 Моя история"), KeyboardButton(text="✅ Чек-ин")],
-            [KeyboardButton(text="📈 График"), KeyboardButton(text="🔍 Инсайты")],
-            [KeyboardButton(text="📅 Календарь"), KeyboardButton(text="💬 Обратная связь")],
+            [KeyboardButton(text=t(lang, "btn_test"))],
+            [KeyboardButton(text=t(lang, "btn_history")), KeyboardButton(text=t(lang, "btn_checkin"))],
+            [KeyboardButton(text=t(lang, "btn_chart")), KeyboardButton(text=t(lang, "btn_insights"))],
+            [KeyboardButton(text=t(lang, "btn_calendar")), KeyboardButton(text=t(lang, "btn_feedback"))],
         ],
         resize_keyboard=True
     )

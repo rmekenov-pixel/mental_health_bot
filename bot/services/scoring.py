@@ -2,7 +2,13 @@ import json
 import os
 
 
-def load_test(test_name: str) -> dict:
+def load_test(test_name: str, lang: str = "ru") -> dict:
+    if lang and lang != "ru":
+        localized_path = os.path.join("tests", f"{test_name}_{lang}.json")
+        if os.path.exists(localized_path):
+            with open(localized_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+
     path = os.path.join("tests", f"{test_name}.json")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -12,8 +18,8 @@ def calculate_score(answers: list[int]) -> int:
     return sum(answers)
 
 
-def calculate_burnout_scores(answers: list[int]) -> dict:
-    test = load_test("burnout")
+def calculate_burnout_scores(answers: list[int], lang: str = "ru") -> dict:
+    test = load_test("burnout", lang)
     subscales = test["subscales"]
 
     ee_score = sum(answers[i] for i in subscales["emotional_exhaustion"])
@@ -40,10 +46,10 @@ def calculate_burnout_scores(answers: list[int]) -> dict:
     }
 
 
-def get_level(test_name: str, score: int) -> str:
+def get_level(test_name: str, score: int, lang: str = "ru") -> str:
     if test_name == "burnout":
         return "См. детальный анализ"
-    test = load_test(test_name)
+    test = load_test(test_name, lang)
     for range_str, level in test["scoring"].items():
         parts = range_str.split("-")
         low, high = int(parts[0]), int(parts[1])
@@ -52,11 +58,11 @@ def get_level(test_name: str, score: int) -> str:
     return "Неизвестно"
 
 
-def get_test_questions(test_name: str) -> list[str]:
-    test = load_test(test_name)
+def get_test_questions(test_name: str, lang: str = "ru") -> list[str]:
+    test = load_test(test_name, lang)
     return test["questions"]
 
 
-def get_test_options(test_name: str) -> list[str]:
-    test = load_test(test_name)
+def get_test_options(test_name: str, lang: str = "ru") -> list[str]:
+    test = load_test(test_name, lang)
     return test["options"]
