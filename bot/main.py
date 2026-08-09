@@ -65,6 +65,9 @@ async def main():
     dp.include_router(calendar.router)
     dp.include_router(language.router)
 
+    from bot.handlers import chat
+    dp.include_router(chat.router)
+
     scheduler = setup_scheduler(bot)
     scheduler.start()
 
