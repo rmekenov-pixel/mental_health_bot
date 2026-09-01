@@ -9,6 +9,7 @@ from bot.keyboards.test_kb import get_main_keyboard
 from bot.states.test_states import ReminderStates
 from bot.services.localization import t, get_user_lang
 from bot.handlers.language import get_language_keyboard, LANG_MAP
+from bot.services.ai_explanation import test_ai_connection
 
 router = Router()
 
@@ -105,3 +106,19 @@ async def cmd_help(message: Message):
         parse_mode="HTML",
         reply_markup=get_main_keyboard(lang)
     )
+
+
+@router.message(Command("ai_status"))
+async def cmd_ai_status(message: Message):
+    """Диагностическая команда проверки AI подключения."""
+    msg = await message.answer("🔄 Проверяю подключение к AI провайдерам...")
+    diag = await test_ai_connection()
+    
+    text = (
+        "🔍 <b>Диагностика AI подключения:</b>\n\n"
+        f"• <b>Google Gemini API Key:</b> {'✅ Настроен' if diag['gemini_key_present'] else '❌ Не найден в переменных'}\n"
+        f"  Статус Gemini 1.5 Flash: {diag['gemini_status']}\n\n"
+        f"• <b>Groq API Key:</b> {'✅ Настроен' if diag['groq_key_present'] else '❌ Не найден в переменных'}\n"
+        f"  Статус Groq Llama: {diag['groq_status']}"
+    )
+    await msg.edit_text(text, parse_mode="HTML")

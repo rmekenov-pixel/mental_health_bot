@@ -6,16 +6,20 @@ logger = logging.getLogger("ai_explanation")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# Список моделей Groq для автоматического перебора при смене/декомиссии
+# Чистим ключи от случайных пробелов и кавычек при вставке в env
+_CLEAN_GROQ_KEY = (GROQ_API_KEY or "").strip().strip('"').strip("'")
+_CLEAN_GEMINI_KEY = (GEMINI_API_KEY or "").strip().strip('"').strip("'")
+
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
-    "llama-3.1-70b-versatile",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+    "deepseek-r1-distill-llama-70b",
     "gemma2-9b-it",
     "mixtral-8x7b-32768",
 ]
 
-# Кэш готовых объяснений тестов (test_name:score:lang -> explanation_text)
 _TEST_EXPLANATION_CACHE = {}
 
 _LANG_NAMES = {
@@ -77,22 +81,53 @@ SYSTEM_PROMPT_REFLECTION = """Ты тёплый и внимательный по
 - Варьируй рекомендации: смотри на данные и думай что реально поможет этому человеку сейчас"""
 
 
-async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature: float = 0.8) -> str:
-    """Выполняет прямой запрос к Google Gemini REST API."""
-    if not GEMINI_API_KEY:
-        return None
-
+def normalize_messages(messages: list) -> tuple[str, list]:
+    """
+    Нормализует список сообщений:
+    - Извлекает системный промпт
+    - Объединяет идущие подряд сообщения с одинаковой ролью (для Gemini API)
+    - Убирает пустые сообщения
+    """
     system_text = ""
-    contents = []
+    turns = []
+
     for m in messages:
         role = m.get("role")
-        text = m.get("content", "")
+        content = (m.get("content") or "").strip()
+        if not content:
+            continue
+
         if role == "system":
-            system_text = text
-        elif role == "user":
-            contents.append({"role": "user", "parts": [{"text": text}]})
-        elif role == "assistant":
-            contents.append({"role": "model", "parts": [{"text": text}]})
+            if system_text:
+                system_text += "\n\n" + content
+            else:
+                system_text = content
+        elif role in ("user", "assistant"):
+            if turns and turns[-1]["role"] == role:
+                turns[-1]["content"] += "\n\n" + content
+            else:
+                turns.append({"role": role, "content": content})
+
+    # Gemini требует чтобы диалог начинался с 'user'
+    while turns and turns[0]["role"] == "assistant":
+        turns.pop(0)
+
+    return system_text, turns
+
+
+async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature: float = 0.8) -> str:
+    """Выполняет прямой запрос к Google Gemini REST API с валидацией диалога."""
+    if not _CLEAN_GEMINI_KEY:
+        return None
+
+    system_text, turns = normalize_messages(messages)
+    if not turns:
+        return None
+
+    contents = []
+    for turn in turns:
+        role = "user" if turn["role"] == "user" else "model"
+        contents.append({"role": role, "parts": [{"text": turn["content"]}]})
 
     payload = {
         "contents": contents,
@@ -108,9 +143,9 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
 
     timeout = aiohttp.ClientTimeout(total=20)
 
-    # Пробуем доступные модели Gemini
+    # Пробуем актуальные модели Google Gemini
     for model in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_CLEAN_GEMINI_KEY}"
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, json=payload) as response:
@@ -132,11 +167,17 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
 
 async def _call_groq(messages: list, max_tokens: int = 400, temperature: float = 0.8) -> str:
     """Выполняет запрос к Groq API с перебором активных моделей."""
-    if not GROQ_API_KEY:
+    if not _CLEAN_GROQ_KEY:
         return None
 
+    system_text, turns = normalize_messages(messages)
+    clean_messages = []
+    if system_text:
+        clean_messages.append({"role": "system", "content": system_text})
+    clean_messages.extend(turns)
+
     headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Authorization": f"Bearer {_CLEAN_GROQ_KEY}",
         "Content-Type": "application/json"
     }
     timeout = aiohttp.ClientTimeout(total=20)
@@ -144,7 +185,7 @@ async def _call_groq(messages: list, max_tokens: int = 400, temperature: float =
     for model in GROQ_MODELS:
         payload = {
             "model": model,
-            "messages": messages,
+            "messages": clean_messages,
             "max_tokens": max_tokens,
             "temperature": temperature
         }
@@ -170,21 +211,43 @@ async def _call_ai(messages: list, max_tokens: int = 500, temperature: float = 0
     2. При ошибке или отсутствии ключа — переключается на Groq (Llama).
     """
     # 1. Приоритет: Google Gemini
-    if GEMINI_API_KEY:
+    if _CLEAN_GEMINI_KEY:
         res = await _call_gemini_native(messages, max_tokens, temperature)
         if res:
             return res
 
     # 2. Резерв: Groq Cloud
-    if GROQ_API_KEY:
+    if _CLEAN_GROQ_KEY:
         res = await _call_groq(messages, max_tokens, temperature)
         if res:
             return res
 
-    if not GEMINI_API_KEY and not GROQ_API_KEY:
+    if not _CLEAN_GEMINI_KEY and not _CLEAN_GROQ_KEY:
         logger.error("No AI keys found (neither GEMINI_API_KEY nor GROQ_API_KEY set).")
 
     return None
+
+
+async def test_ai_connection() -> dict:
+    """Диагностическая функция для проверки статуса подключения к AI провайдерам."""
+    results = {
+        "gemini_key_present": bool(_CLEAN_GEMINI_KEY),
+        "groq_key_present": bool(_CLEAN_GROQ_KEY),
+        "gemini_status": "Not configured",
+        "groq_status": "Not configured"
+    }
+
+    test_messages = [{"role": "user", "content": "Привет! Ответь одним словом: Работает"}]
+
+    if _CLEAN_GEMINI_KEY:
+        res = await _call_gemini_native(test_messages, max_tokens=10)
+        results["gemini_status"] = f"✅ OK ({res})" if res else "❌ Failed (Check logs)"
+
+    if _CLEAN_GROQ_KEY:
+        res = await _call_groq(test_messages, max_tokens=10)
+        results["groq_status"] = f"✅ OK ({res})" if res else "❌ Failed (Check logs)"
+
+    return results
 
 
 async def get_ai_explanation(test_name: str, score: int, level: str, lang: str = "ru") -> str:
@@ -192,7 +255,7 @@ async def get_ai_explanation(test_name: str, score: int, level: str, lang: str =
     if cache_key in _TEST_EXPLANATION_CACHE:
         return _TEST_EXPLANATION_CACHE[cache_key]
 
-    if not GROQ_API_KEY and not GEMINI_API_KEY:
+    if not _CLEAN_GROQ_KEY and not _CLEAN_GEMINI_KEY:
         return _FALLBACK_NO_KEY.get(lang, _FALLBACK_NO_KEY["ru"])
 
     lang_name = _LANG_NAMES.get(lang, _LANG_NAMES["ru"])
@@ -218,7 +281,7 @@ async def get_ai_explanation(test_name: str, score: int, level: str, lang: str =
 
 
 async def get_ai_weekly_reflection(avg_mood: float, avg_anxiety: float, avg_energy: float, checkin_count: int, lang: str = "ru") -> str:
-    if not GROQ_API_KEY and not GEMINI_API_KEY:
+    if not _CLEAN_GROQ_KEY and not _CLEAN_GEMINI_KEY:
         return _FALLBACK_UNAVAILABLE_REFLECTION.get(lang, _FALLBACK_UNAVAILABLE_REFLECTION["ru"])
 
     lang_name = _LANG_NAMES.get(lang, _LANG_NAMES["ru"])
