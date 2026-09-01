@@ -5,6 +5,7 @@ import bot.config as cfg
 logger = logging.getLogger("ai_explanation")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 GEMINI_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
 def get_groq_key() -> str:
@@ -15,16 +16,7 @@ def get_gemini_key() -> str:
     key = cfg.GEMINI_API_KEY or ""
     return key.strip().strip('"').strip("'")
 
-GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "llama3-70b-8192",
-    "llama3-8b-8192",
-    "deepseek-r1-distill-llama-70b",
-    "gemma2-9b-it",
-    "mixtral-8x7b-32768",
-]
-
+_GROQ_ACTIVE_MODELS_CACHE = []
 _TEST_EXPLANATION_CACHE = {}
 
 _LANG_NAMES = {
@@ -90,7 +82,7 @@ def normalize_messages(messages: list) -> tuple[str, list]:
     """
     Нормализует список сообщений:
     - Извлекает системный промпт
-    - Объединяет идущие подряд сообщения с одинаковой ролью (для Gemini API)
+    - Объединяет идущие подряд сообщения с одинаковой ролью
     - Убирает пустые сообщения
     """
     system_text = ""
@@ -119,9 +111,36 @@ def normalize_messages(messages: list) -> tuple[str, list]:
     return system_text, turns
 
 
+async def _get_live_groq_models(groq_key: str) -> list[str]:
+    """Динамически запрашивает актуальный список доступных моделей у Groq API."""
+    global _GROQ_ACTIVE_MODELS_CACHE
+    if _GROQ_ACTIVE_MODELS_CACHE:
+        return _GROQ_ACTIVE_MODELS_CACHE
+
+    headers = {"Authorization": f"Bearer {groq_key}"}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            async with session.get(GROQ_MODELS_URL, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    raw_models = [m["id"] for m in data.get("data", []) if m.get("active", True)]
+                    
+                    # Приоритет отдаем текстовым chat-моделям (llama, qwen, gemma, deepseek)
+                    preferred = [m for m in raw_models if not any(x in m for x in ["whisper", "guard", "vision", "embed"])]
+                    if preferred:
+                        _GROQ_ACTIVE_MODELS_CACHE = preferred
+                        logger.info(f"Loaded {len(preferred)} active Groq models: {preferred[:3]}")
+                        return preferred
+    except Exception as e:
+        logger.error(f"Failed to fetch live Groq models: {e}")
+
+    # Запасной список на случай ошибки получения списка
+    return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen-2.5-32b", "gemma2-9b-it"]
+
+
 async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature: float = 0.8) -> tuple[str, str]:
     """
-    Выполняет запрос к Google Gemini API (поддерживает как x-goog-api-key, так и Bearer токен).
+    Выполняет запрос к Google Gemini API.
     """
     gemini_key = get_gemini_key()
     if not gemini_key:
@@ -131,7 +150,7 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
     if not turns:
         return None, "No messages to send"
 
-    # Вариант 1: Прямой REST API с x-goog-api-key
+    # 1. Прямой REST API с x-goog-api-key
     contents = []
     for turn in turns:
         role = "user" if turn["role"] == "user" else "model"
@@ -158,7 +177,6 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
     last_err = "Unknown error"
 
     for model in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
-        # Пробуем через Header x-goog-api-key и URL
         urls = [
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
@@ -182,7 +200,7 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
                 last_err = str(e)
                 logger.error(f"Gemini request exception ({model}): {e}")
 
-    # Вариант 2: OpenAI-совместимый эндпоинт Google
+    # 2. OpenAI-совместимый эндпоинт
     openai_messages = []
     if system_text:
         openai_messages.append({"role": "system", "content": system_text})
@@ -217,8 +235,7 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
 
 async def _call_groq(messages: list, max_tokens: int = 400, temperature: float = 0.8) -> tuple[str, str]:
     """
-    Выполняет запрос к Groq API с перебором активных моделей.
-    Возвращает (content, error_reason).
+    Выполняет запрос к Groq API с динамическим получением списка активных моделей.
     """
     groq_key = get_groq_key()
     if not groq_key:
@@ -237,7 +254,10 @@ async def _call_groq(messages: list, max_tokens: int = 400, temperature: float =
     timeout = aiohttp.ClientTimeout(total=20)
     last_err = "Unknown error"
 
-    for model in GROQ_MODELS:
+    # Получаем живые активные модели с сервера Groq
+    models_to_try = await _get_live_groq_models(groq_key)
+
+    for model in models_to_try:
         payload = {
             "model": model,
             "messages": clean_messages,
