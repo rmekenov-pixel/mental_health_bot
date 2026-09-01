@@ -4,13 +4,16 @@ from bot.config import GROQ_API_KEY, GEMINI_API_KEY
 
 logger = logging.getLogger("ai_explanation")
 
-# Эндпоинты провайдеров
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
-GROQ_PRIMARY_MODEL = "llama-3.3-70b-versatile"
-GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant"
-GEMINI_MODEL = "gemini-2.0-flash"
+# Список моделей Groq для автоматического перебора при смене/декомиссии
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "llama-3.1-70b-versatile",
+    "gemma2-9b-it",
+    "mixtral-8x7b-32768",
+]
 
 # Кэш готовых объяснений тестов (test_name:score:lang -> explanation_text)
 _TEST_EXPLANATION_CACHE = {}
@@ -74,72 +77,117 @@ SYSTEM_PROMPT_REFLECTION = """Ты тёплый и внимательный по
 - Варьируй рекомендации: смотри на данные и думай что реально поможет этому человеку сейчас"""
 
 
-async def _call_ai(messages: list, max_tokens: int = 400, temperature: float = 0.8) -> str:
-    """
-    Выполняет запрос к AI с многоуровневым каскадом отказоустойчивости:
-    1. Google Gemini 2.0 Flash (если задан GEMINI_API_KEY — 1M токенов/мин)
-    2. Groq Llama 3.3 70B (если задан GROQ_API_KEY)
-    3. Groq Llama 3.1 8B (резервный сверхбыстрый)
-    """
-    timeout = aiohttp.ClientTimeout(total=25)
+async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature: float = 0.8) -> str:
+    """Выполняет прямой запрос к Google Gemini REST API."""
+    if not GEMINI_API_KEY:
+        return None
 
-    # 1. Пробуем Google Gemini Flash
-    if GEMINI_API_KEY:
-        gemini_headers = {
-            "Authorization": f"Bearer {GEMINI_API_KEY}",
-            "Content-Type": "application/json"
+    system_text = ""
+    contents = []
+    for m in messages:
+        role = m.get("role")
+        text = m.get("content", "")
+        if role == "system":
+            system_text = text
+        elif role == "user":
+            contents.append({"role": "user", "parts": [{"text": text}]})
+        elif role == "assistant":
+            contents.append({"role": "model", "parts": [{"text": text}]})
+
+    payload = {
+        "contents": contents,
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": temperature
         }
-        gemini_payload = {
-            "model": GEMINI_MODEL,
+    }
+    if system_text:
+        payload["system_instruction"] = {
+            "parts": [{"text": system_text}]
+        }
+
+    timeout = aiohttp.ClientTimeout(total=20)
+
+    # Пробуем доступные модели Gemini
+    for model in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        candidates = data.get("candidates", [])
+                        if candidates and "content" in candidates[0]:
+                            parts = candidates[0]["content"].get("parts", [])
+                            if parts:
+                                return parts[0].get("text", "").strip()
+                    else:
+                        err_body = await response.text()
+                        logger.error(f"Gemini API error ({model}) HTTP {response.status}: {err_body}")
+        except Exception as e:
+            logger.error(f"Gemini request exception ({model}): {e}")
+
+    return None
+
+
+async def _call_groq(messages: list, max_tokens: int = 400, temperature: float = 0.8) -> str:
+    """Выполняет запрос к Groq API с перебором активных моделей."""
+    if not GROQ_API_KEY:
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    timeout = aiohttp.ClientTimeout(total=20)
+
+    for model in GROQ_MODELS:
+        payload = {
+            "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature
         }
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(GEMINI_URL, headers=gemini_headers, json=gemini_payload) as response:
+                async with session.post(GROQ_URL, headers=headers, json=payload) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return data["choices"][0]["message"]["content"]
+                        return data["choices"][0]["message"]["content"].strip()
                     else:
                         err_body = await response.text()
-                        logger.warning(f"Gemini API returned HTTP {response.status}: {err_body}")
+                        logger.error(f"Groq API error ({model}) HTTP {response.status}: {err_body}")
         except Exception as e:
-            logger.warning(f"Gemini API exception: {e}")
+            logger.error(f"Groq API request exception ({model}): {e}")
 
-    # 2. Пробуем Groq API (основная 70b, затем запасная 8b)
+    return None
+
+
+async def _call_ai(messages: list, max_tokens: int = 500, temperature: float = 0.8) -> str:
+    """
+    Главная точка входа в AI.
+    1. Пробует Google Gemini (1 000 000 TPM бесплатно).
+    2. При ошибке или отсутствии ключа — переключается на Groq (Llama).
+    """
+    # 1. Приоритет: Google Gemini
+    if GEMINI_API_KEY:
+        res = await _call_gemini_native(messages, max_tokens, temperature)
+        if res:
+            return res
+
+    # 2. Резерв: Groq Cloud
     if GROQ_API_KEY:
-        groq_headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        for model in [GROQ_PRIMARY_MODEL, GROQ_FALLBACK_MODEL]:
-            payload = {
-                "model": model,
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature
-            }
-            try:
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.post(GROQ_URL, headers=groq_headers, json=payload) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            return data["choices"][0]["message"]["content"]
-                        else:
-                            err_body = await response.text()
-                            logger.error(f"Groq API error ({model}) HTTP {response.status}: {err_body}")
-            except Exception as e:
-                logger.error(f"Groq API exception ({model}): {e}")
+        res = await _call_groq(messages, max_tokens, temperature)
+        if res:
+            return res
 
     if not GEMINI_API_KEY and not GROQ_API_KEY:
-        logger.error("No AI API keys configured (neither GEMINI_API_KEY nor GROQ_API_KEY found).")
+        logger.error("No AI keys found (neither GEMINI_API_KEY nor GROQ_API_KEY set).")
 
     return None
 
 
 async def get_ai_explanation(test_name: str, score: int, level: str, lang: str = "ru") -> str:
-    # 1. Проверяем кэш результатов
     cache_key = f"{test_name}:{score}:{level}:{lang}"
     if cache_key in _TEST_EXPLANATION_CACHE:
         return _TEST_EXPLANATION_CACHE[cache_key]
@@ -163,7 +211,6 @@ async def get_ai_explanation(test_name: str, score: int, level: str, lang: str =
 
     result = await _call_ai(messages=messages, max_tokens=400, temperature=0.8)
     if result:
-        # Сохраняем в кэш для мгновенной отдачи при повторных результатах
         _TEST_EXPLANATION_CACHE[cache_key] = result
         return result
 
