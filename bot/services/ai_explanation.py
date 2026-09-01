@@ -5,6 +5,7 @@ import bot.config as cfg
 logger = logging.getLogger("ai_explanation")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+GEMINI_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
 def get_groq_key() -> str:
     key = cfg.GROQ_API_KEY or ""
@@ -112,7 +113,6 @@ def normalize_messages(messages: list) -> tuple[str, list]:
             else:
                 turns.append({"role": role, "content": content})
 
-    # Gemini требует чтобы диалог начинался с 'user'
     while turns and turns[0]["role"] == "assistant":
         turns.pop(0)
 
@@ -121,8 +121,7 @@ def normalize_messages(messages: list) -> tuple[str, list]:
 
 async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature: float = 0.8) -> tuple[str, str]:
     """
-    Выполняет прямой запрос к Google Gemini REST API.
-    Возвращает (content, error_reason).
+    Выполняет запрос к Google Gemini API (поддерживает как x-goog-api-key, так и Bearer токен).
     """
     gemini_key = get_gemini_key()
     if not gemini_key:
@@ -132,6 +131,7 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
     if not turns:
         return None, "No messages to send"
 
+    # Вариант 1: Прямой REST API с x-goog-api-key
     contents = []
     for turn in turns:
         role = "user" if turn["role"] == "user" else "model"
@@ -149,28 +149,68 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
             "parts": [{"text": system_text}]
         }
 
+    headers_native = {
+        "x-goog-api-key": gemini_key,
+        "Content-Type": "application/json"
+    }
+
     timeout = aiohttp.ClientTimeout(total=20)
     last_err = "Unknown error"
 
     for model in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
-        try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, json=payload) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        candidates = data.get("candidates", [])
-                        if candidates and "content" in candidates[0]:
-                            parts = candidates[0]["content"].get("parts", [])
-                            if parts:
-                                return parts[0].get("text", "").strip(), None
-                    else:
-                        err_body = await response.text()
-                        last_err = f"HTTP {response.status}: {err_body[:100]}"
-                        logger.error(f"Gemini API error ({model}) HTTP {response.status}: {err_body}")
-        except Exception as e:
-            last_err = str(e)
-            logger.error(f"Gemini request exception ({model}): {e}")
+        # Пробуем через Header x-goog-api-key и URL
+        urls = [
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+        ]
+        for url in urls:
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(url, headers=headers_native, json=payload) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            candidates = data.get("candidates", [])
+                            if candidates and "content" in candidates[0]:
+                                parts = candidates[0]["content"].get("parts", [])
+                                if parts:
+                                    return parts[0].get("text", "").strip(), None
+                        else:
+                            err_body = await response.text()
+                            last_err = f"HTTP {response.status}: {err_body[:100]}"
+                            logger.error(f"Gemini API error ({model}) HTTP {response.status}: {err_body}")
+            except Exception as e:
+                last_err = str(e)
+                logger.error(f"Gemini request exception ({model}): {e}")
+
+    # Вариант 2: OpenAI-совместимый эндпоинт Google
+    openai_messages = []
+    if system_text:
+        openai_messages.append({"role": "system", "content": system_text})
+    openai_messages.extend(turns)
+
+    headers_openai = {
+        "Authorization": f"Bearer {gemini_key}",
+        "Content-Type": "application/json"
+    }
+    payload_openai = {
+        "model": "gemini-1.5-flash",
+        "messages": openai_messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature
+    }
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(GEMINI_OPENAI_URL, headers=headers_openai, json=payload_openai) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"].strip(), None
+                else:
+                    err_body = await response.text()
+                    last_err = f"OpenAI-compat HTTP {response.status}: {err_body[:100]}"
+                    logger.error(f"Gemini OpenAI-compat error HTTP {response.status}: {err_body}")
+    except Exception as e:
+        last_err = str(e)
+        logger.error(f"Gemini OpenAI-compat exception: {e}")
 
     return None, last_err
 
