@@ -1,14 +1,18 @@
 import aiohttp
 import logging
-from bot.config import GROQ_API_KEY, GEMINI_API_KEY
+import bot.config as cfg
 
 logger = logging.getLogger("ai_explanation")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# Чистим ключи от случайных пробелов и кавычек при вставке в env
-_CLEAN_GROQ_KEY = (GROQ_API_KEY or "").strip().strip('"').strip("'")
-_CLEAN_GEMINI_KEY = (GEMINI_API_KEY or "").strip().strip('"').strip("'")
+def get_groq_key() -> str:
+    key = cfg.GROQ_API_KEY or ""
+    return key.strip().strip('"').strip("'")
+
+def get_gemini_key() -> str:
+    key = cfg.GEMINI_API_KEY or ""
+    return key.strip().strip('"').strip("'")
 
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
@@ -115,14 +119,18 @@ def normalize_messages(messages: list) -> tuple[str, list]:
     return system_text, turns
 
 
-async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature: float = 0.8) -> str:
-    """Выполняет прямой запрос к Google Gemini REST API с валидацией диалога."""
-    if not _CLEAN_GEMINI_KEY:
-        return None
+async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature: float = 0.8) -> tuple[str, str]:
+    """
+    Выполняет прямой запрос к Google Gemini REST API.
+    Возвращает (content, error_reason).
+    """
+    gemini_key = get_gemini_key()
+    if not gemini_key:
+        return None, "Key not found"
 
     system_text, turns = normalize_messages(messages)
     if not turns:
-        return None
+        return None, "No messages to send"
 
     contents = []
     for turn in turns:
@@ -142,10 +150,10 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
         }
 
     timeout = aiohttp.ClientTimeout(total=20)
+    last_err = "Unknown error"
 
-    # Пробуем актуальные модели Google Gemini
     for model in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_CLEAN_GEMINI_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, json=payload) as response:
@@ -155,20 +163,26 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
                         if candidates and "content" in candidates[0]:
                             parts = candidates[0]["content"].get("parts", [])
                             if parts:
-                                return parts[0].get("text", "").strip()
+                                return parts[0].get("text", "").strip(), None
                     else:
                         err_body = await response.text()
+                        last_err = f"HTTP {response.status}: {err_body[:100]}"
                         logger.error(f"Gemini API error ({model}) HTTP {response.status}: {err_body}")
         except Exception as e:
+            last_err = str(e)
             logger.error(f"Gemini request exception ({model}): {e}")
 
-    return None
+    return None, last_err
 
 
-async def _call_groq(messages: list, max_tokens: int = 400, temperature: float = 0.8) -> str:
-    """Выполняет запрос к Groq API с перебором активных моделей."""
-    if not _CLEAN_GROQ_KEY:
-        return None
+async def _call_groq(messages: list, max_tokens: int = 400, temperature: float = 0.8) -> tuple[str, str]:
+    """
+    Выполняет запрос к Groq API с перебором активных моделей.
+    Возвращает (content, error_reason).
+    """
+    groq_key = get_groq_key()
+    if not groq_key:
+        return None, "Key not found"
 
     system_text, turns = normalize_messages(messages)
     clean_messages = []
@@ -177,10 +191,11 @@ async def _call_groq(messages: list, max_tokens: int = 400, temperature: float =
     clean_messages.extend(turns)
 
     headers = {
-        "Authorization": f"Bearer {_CLEAN_GROQ_KEY}",
+        "Authorization": f"Bearer {groq_key}",
         "Content-Type": "application/json"
     }
     timeout = aiohttp.ClientTimeout(total=20)
+    last_err = "Unknown error"
 
     for model in GROQ_MODELS:
         payload = {
@@ -194,14 +209,16 @@ async def _call_groq(messages: list, max_tokens: int = 400, temperature: float =
                 async with session.post(GROQ_URL, headers=headers, json=payload) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return data["choices"][0]["message"]["content"].strip()
+                        return data["choices"][0]["message"]["content"].strip(), None
                     else:
                         err_body = await response.text()
+                        last_err = f"HTTP {response.status}: {err_body[:100]}"
                         logger.error(f"Groq API error ({model}) HTTP {response.status}: {err_body}")
         except Exception as e:
+            last_err = str(e)
             logger.error(f"Groq API request exception ({model}): {e}")
 
-    return None
+    return None, last_err
 
 
 async def _call_ai(messages: list, max_tokens: int = 500, temperature: float = 0.8) -> str:
@@ -210,42 +227,42 @@ async def _call_ai(messages: list, max_tokens: int = 500, temperature: float = 0
     1. Пробует Google Gemini (1 000 000 TPM бесплатно).
     2. При ошибке или отсутствии ключа — переключается на Groq (Llama).
     """
-    # 1. Приоритет: Google Gemini
-    if _CLEAN_GEMINI_KEY:
-        res = await _call_gemini_native(messages, max_tokens, temperature)
+    if get_gemini_key():
+        res, _ = await _call_gemini_native(messages, max_tokens, temperature)
         if res:
             return res
 
-    # 2. Резерв: Groq Cloud
-    if _CLEAN_GROQ_KEY:
-        res = await _call_groq(messages, max_tokens, temperature)
+    if get_groq_key():
+        res, _ = await _call_groq(messages, max_tokens, temperature)
         if res:
             return res
-
-    if not _CLEAN_GEMINI_KEY and not _CLEAN_GROQ_KEY:
-        logger.error("No AI keys found (neither GEMINI_API_KEY nor GROQ_API_KEY set).")
 
     return None
 
 
 async def test_ai_connection() -> dict:
-    """Диагностическая функция для проверки статуса подключения к AI провайдерам."""
+    """Диагностическая функция для детальной проверки статуса AI провайдеров."""
+    gemini_key = get_gemini_key()
+    groq_key = get_groq_key()
+
     results = {
-        "gemini_key_present": bool(_CLEAN_GEMINI_KEY),
-        "groq_key_present": bool(_CLEAN_GROQ_KEY),
+        "gemini_key_present": bool(gemini_key),
+        "groq_key_present": bool(groq_key),
         "gemini_status": "Not configured",
-        "groq_status": "Not configured"
+        "groq_status": "Not configured",
+        "gemini_key_mask": f"{gemini_key[:6]}...{gemini_key[-4:]}" if len(gemini_key) > 10 else ("Set" if gemini_key else "Missing"),
+        "groq_key_mask": f"{groq_key[:6]}...{groq_key[-4:]}" if len(groq_key) > 10 else ("Set" if groq_key else "Missing"),
     }
 
     test_messages = [{"role": "user", "content": "Привет! Ответь одним словом: Работает"}]
 
-    if _CLEAN_GEMINI_KEY:
-        res = await _call_gemini_native(test_messages, max_tokens=10)
-        results["gemini_status"] = f"✅ OK ({res})" if res else "❌ Failed (Check logs)"
+    if gemini_key:
+        res, err = await _call_gemini_native(test_messages, max_tokens=10)
+        results["gemini_status"] = f"✅ OK ({res})" if res else f"❌ {err}"
 
-    if _CLEAN_GROQ_KEY:
-        res = await _call_groq(test_messages, max_tokens=10)
-        results["groq_status"] = f"✅ OK ({res})" if res else "❌ Failed (Check logs)"
+    if groq_key:
+        res, err = await _call_groq(test_messages, max_tokens=10)
+        results["groq_status"] = f"✅ OK ({res})" if res else f"❌ {err}"
 
     return results
 
@@ -255,7 +272,7 @@ async def get_ai_explanation(test_name: str, score: int, level: str, lang: str =
     if cache_key in _TEST_EXPLANATION_CACHE:
         return _TEST_EXPLANATION_CACHE[cache_key]
 
-    if not _CLEAN_GROQ_KEY and not _CLEAN_GEMINI_KEY:
+    if not get_groq_key() and not get_gemini_key():
         return _FALLBACK_NO_KEY.get(lang, _FALLBACK_NO_KEY["ru"])
 
     lang_name = _LANG_NAMES.get(lang, _LANG_NAMES["ru"])
@@ -281,7 +298,7 @@ async def get_ai_explanation(test_name: str, score: int, level: str, lang: str =
 
 
 async def get_ai_weekly_reflection(avg_mood: float, avg_anxiety: float, avg_energy: float, checkin_count: int, lang: str = "ru") -> str:
-    if not _CLEAN_GROQ_KEY and not _CLEAN_GEMINI_KEY:
+    if not get_groq_key() and not get_gemini_key():
         return _FALLBACK_UNAVAILABLE_REFLECTION.get(lang, _FALLBACK_UNAVAILABLE_REFLECTION["ru"])
 
     lang_name = _LANG_NAMES.get(lang, _LANG_NAMES["ru"])
