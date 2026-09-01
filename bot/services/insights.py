@@ -4,7 +4,8 @@ from database.models import CheckIn, TestResult
 from sqlalchemy import select
 from datetime import datetime, timedelta
 from bot.services.localization import t
-from bot.services.ai_explanation import _call_groq
+from bot.services.ai_explanation import _call_ai
+from bot.config import GROQ_API_KEY, GEMINI_API_KEY
 
 logger = logging.getLogger("insights")
 
@@ -116,9 +117,7 @@ async def get_correlation_insights(telegram_id: int, lang: str = "ru") -> str:
         if days_since_test > 14:
             test_suggestion = f"Последний тест был {days_since_test} дней назад — возможно стоит пройти повторно чтобы сравнить динамику."
 
-    from bot.config import GROQ_API_KEY
-
-    if not GROQ_API_KEY:
+    if not GROQ_API_KEY and not GEMINI_API_KEY:
         return _build_basic_insights(cur_mood, cur_anxiety, cur_energy, cur_sleep, lang)
 
     lang_name = _LANG_NAMES.get(lang, _LANG_NAMES["ru"])
@@ -149,11 +148,11 @@ async def get_correlation_insights(telegram_id: int, lang: str = "ru") -> str:
     ]
 
     try:
-        res = await _call_groq(messages=messages, max_tokens=500, temperature=0.7)
+        res = await _call_ai(messages=messages, max_tokens=500, temperature=0.7)
         if res:
             return res
     except Exception as e:
-        logger.error(f"Error getting correlation insights from Groq: {e}")
+        logger.error(f"Error getting correlation insights from AI: {e}")
 
     return _build_basic_insights(cur_mood, cur_anxiety, cur_energy, cur_sleep, lang)
 

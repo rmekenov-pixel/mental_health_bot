@@ -29,6 +29,9 @@ async def init_db():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_time VARCHAR DEFAULT '20:00'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS utc_offset INTEGER DEFAULT 5",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR DEFAULT 'ru'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_ai_count INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ai_request_date TIMESTAMP",
     ]
 
     for migration in migrations:
@@ -37,7 +40,7 @@ async def init_db():
                 await conn.execute(text(migration))
         except Exception as e:
             import logging
-            logging.error(f"Migration failed: {migration} - {e}")
+            logging.error(f"Migration notice: {migration} - {e}")
 
 
 async def get_session() -> AsyncSession:

@@ -6,7 +6,8 @@
 - История диалога хранится в FSM (память в рамках сессии)
 - Промпт явно требует отвечать на языке пользователя
 - SAFETY: Немедленный перехват суицидальных кризисов без обращения к AI
-- Защита от спама и лимитов
+- QUOTA: Суточные лимиты на пользователя (25 бесплатных AI-сообщений в день)
+- MULTI-PROVIDER: Поддержка Google Gemini Flash (1M токенов/мин) и Groq Llama
 """
 
 import time
@@ -20,9 +21,10 @@ from database.models import CheckIn, TestResult, User
 from sqlalchemy import select
 from datetime import datetime, timedelta
 
-from bot.config import GROQ_API_KEY
-from bot.services.ai_explanation import _call_groq
+from bot.config import GROQ_API_KEY, GEMINI_API_KEY
+from bot.services.ai_explanation import _call_ai
 from bot.services.crisis import is_crisis_text, get_crisis_message
+from bot.services.quota import check_and_increment_ai_quota, get_limit_exceeded_message
 
 logger = logging.getLogger("chat_handler")
 
@@ -31,7 +33,7 @@ router = Router()
 # Максимум сообщений в истории диалога (пар вопрос-ответ)
 MAX_HISTORY = 6
 
-# Кэш для простого ограничения частоты запросов (User ID -> timestamp последнего запроса)
+# Кэш для защиты от спама (User ID -> timestamp последнего запроса)
 _USER_LAST_REQUEST = {}
 USER_COOLDOWN_SECONDS = 2.0
 
@@ -158,15 +160,21 @@ async def handle_free_text(message: Message, state: FSMContext):
         await message.answer(get_crisis_message(lang), parse_mode="HTML")
         return
 
-    # 2. Защита от спама (Rate Limiting per user)
+    # 2. Защита от флуда (Rate Limiting per user)
     now = time.time()
     last_req = _USER_LAST_REQUEST.get(message.from_user.id, 0)
     if now - last_req < USER_COOLDOWN_SECONDS:
         return
     _USER_LAST_REQUEST[message.from_user.id] = now
 
-    if not GROQ_API_KEY:
-        await message.answer("AI-чат временно недоступен.")
+    # 3. Проверка суточного лимита сообщений (Quotas & Monetization Foundation)
+    allowed, remaining = await check_and_increment_ai_quota(message.from_user.id)
+    if not allowed:
+        await message.answer(get_limit_exceeded_message(lang), parse_mode="HTML")
+        return
+
+    if not GROQ_API_KEY and not GEMINI_API_KEY:
+        await message.answer("AI-чат временно настраивается администратором.")
         return
 
     # Контекст данных пользователя
@@ -198,10 +206,9 @@ async def handle_free_text(message: Message, state: FSMContext):
 
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
-        reply = await _call_groq(messages=messages, max_tokens=500, temperature=0.8)
+        reply = await _call_ai(messages=messages, max_tokens=500, temperature=0.8)
 
         if reply:
-            # Проверяем ответ AI на безопасность
             chat_history.append({"role": "assistant", "content": reply})
             await state.update_data(chat_history=chat_history)
             await message.answer(reply)
