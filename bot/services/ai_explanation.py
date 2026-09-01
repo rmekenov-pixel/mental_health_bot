@@ -1,7 +1,13 @@
 import aiohttp
+import logging
 from bot.config import GROQ_API_KEY
 
+logger = logging.getLogger("ai_explanation")
+
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+PRIMARY_MODEL = "llama-3.3-70b-versatile"
+FALLBACK_MODEL = "llama-3.1-8b-instant"
 
 _LANG_NAMES = {
     "ru": "русском",
@@ -62,6 +68,45 @@ SYSTEM_PROMPT_REFLECTION = """Ты тёплый и внимательный по
 - Варьируй рекомендации: смотри на данные и думай что реально поможет этому человеку сейчас"""
 
 
+async def _call_groq(messages: list, max_tokens: int = 400, temperature: float = 0.8) -> str:
+    """Выполняет запрос к Groq API с автоматическим переключением на запасную модель при ошибках."""
+    if not GROQ_API_KEY:
+        logger.error("GROQ_API_KEY is not configured in environment variables.")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    timeout = aiohttp.ClientTimeout(total=25)
+
+    # Пробуем основную модель (70b), затем запасную (8b)
+    for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature
+        }
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(GROQ_URL, headers=headers, json=payload) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data["choices"][0]["message"]["content"]
+                    else:
+                        err_body = await response.text()
+                        logger.error(
+                            f"Groq API error ({model}) HTTP {response.status}: {err_body}"
+                        )
+        except Exception as e:
+            logger.error(f"Groq API request exception for model {model}: {e}")
+
+    return None
+
+
 async def get_ai_explanation(test_name: str, score: int, level: str, lang: str = "ru") -> str:
     if not GROQ_API_KEY:
         return _FALLBACK_NO_KEY.get(lang, _FALLBACK_NO_KEY["ru"])
@@ -75,33 +120,16 @@ async def get_ai_explanation(test_name: str, score: int, level: str, lang: str =
 2. Одну-две конкретные практики которые реально помогут при таком результате — назови технику и объясни как её выполнить прямо сейчас
 3. Напомни что это самонаблюдение, не диагноз"""
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT_EXPLANATION},
+        {"role": "user", "content": prompt}
+    ]
 
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT_EXPLANATION},
-            {"role": "user", "content": prompt}
-        ],
-        "max_tokens": 400,
-        "temperature": 0.8
-    }
+    result = await _call_groq(messages=messages, max_tokens=400, temperature=0.8)
+    if result:
+        return result
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(GROQ_URL, headers=headers, json=payload) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    return _FALLBACK_UNAVAILABLE_EXPLANATION.get(lang, _FALLBACK_UNAVAILABLE_EXPLANATION["ru"])
-    except Exception as e:
-        import logging
-        logging.error(f"Groq API error: {e}")
-        return _FALLBACK_UNAVAILABLE_EXPLANATION.get(lang, _FALLBACK_UNAVAILABLE_EXPLANATION["ru"])
+    return _FALLBACK_UNAVAILABLE_EXPLANATION.get(lang, _FALLBACK_UNAVAILABLE_EXPLANATION["ru"])
 
 
 async def get_ai_weekly_reflection(avg_mood: float, avg_anxiety: float, avg_energy: float, checkin_count: int, lang: str = "ru") -> str:
@@ -122,30 +150,13 @@ async def get_ai_weekly_reflection(avg_mood: float, avg_anxiety: float, avg_ener
 2. Что конкретно заслуживает внимания исходя из данных
 3. Одну-две практики которые подходят именно к этим показателям — назови и объясни как выполнить"""
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT_REFLECTION},
+        {"role": "user", "content": prompt}
+    ]
 
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT_REFLECTION},
-            {"role": "user", "content": prompt}
-        ],
-        "max_tokens": 400,
-        "temperature": 0.8
-    }
+    result = await _call_groq(messages=messages, max_tokens=400, temperature=0.8)
+    if result:
+        return result
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(GROQ_URL, headers=headers, json=payload) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    return _FALLBACK_UNAVAILABLE_REFLECTION.get(lang, _FALLBACK_UNAVAILABLE_REFLECTION["ru"])
-    except Exception as e:
-        import logging
-        logging.error(f"AI weekly reflection error: {e}")
-        return _FALLBACK_UNAVAILABLE_REFLECTION.get(lang, _FALLBACK_UNAVAILABLE_REFLECTION["ru"])
+    return _FALLBACK_UNAVAILABLE_REFLECTION.get(lang, _FALLBACK_UNAVAILABLE_REFLECTION["ru"])

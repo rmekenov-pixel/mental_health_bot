@@ -4,11 +4,15 @@ from bot.config import DATABASE_URL
 from database.models import Base
 from sqlalchemy import text
 
-# Для SQLite меняем префикс
+# Корректная обработка префиксов для async SQLAlchemy
 if DATABASE_URL.startswith("sqlite"):
     ASYNC_DATABASE_URL = DATABASE_URL.replace("sqlite://", "sqlite+aiosqlite://")
+elif DATABASE_URL.startswith("postgres://"):
+    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 else:
-    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+    ASYNC_DATABASE_URL = DATABASE_URL
 
 engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
 
@@ -34,6 +38,7 @@ async def init_db():
         except Exception as e:
             import logging
             logging.error(f"Migration failed: {migration} - {e}")
+
 
 async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:

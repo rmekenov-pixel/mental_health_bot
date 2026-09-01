@@ -1,8 +1,12 @@
+import logging
 from database.db import AsyncSessionLocal
 from database.models import CheckIn, TestResult
 from sqlalchemy import select
 from datetime import datetime, timedelta
 from bot.services.localization import t
+from bot.services.ai_explanation import _call_groq
+
+logger = logging.getLogger("insights")
 
 _LANG_NAMES = {
     "ru": "русском",
@@ -113,7 +117,6 @@ async def get_correlation_insights(telegram_id: int, lang: str = "ru") -> str:
             test_suggestion = f"Последний тест был {days_since_test} дней назад — возможно стоит пройти повторно чтобы сравнить динамику."
 
     from bot.config import GROQ_API_KEY
-    import aiohttp
 
     if not GROQ_API_KEY:
         return _build_basic_insights(cur_mood, cur_anxiety, cur_energy, cur_sleep, lang)
@@ -140,29 +143,17 @@ async def get_correlation_insights(telegram_id: int, lang: str = "ru") -> str:
 
 Объём: 4-6 предложений максимум. Без воды."""
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT_INSIGHTS},
-            {"role": "user", "content": prompt}
-        ],
-        "max_tokens": 500,
-        "temperature": 0.7
-    }
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT_INSIGHTS},
+        {"role": "user", "content": prompt}
+    ]
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"]
-    except Exception:
-        pass
+        res = await _call_groq(messages=messages, max_tokens=500, temperature=0.7)
+        if res:
+            return res
+    except Exception as e:
+        logger.error(f"Error getting correlation insights from Groq: {e}")
 
     return _build_basic_insights(cur_mood, cur_anxiety, cur_energy, cur_sleep, lang)
 

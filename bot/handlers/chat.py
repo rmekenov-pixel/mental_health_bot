@@ -1,12 +1,15 @@
 """
 Обработчик свободных сообщений — "умный чат" с MindCheck.
 
-Улучшения v2:
+Улучшения:
 - Язык берётся из БД (поле User.language)
 - История диалога хранится в FSM (память в рамках сессии)
 - Промпт явно требует отвечать на языке пользователя
+- SAFETY: Немедленный перехват суицидальных кризисов без обращения к AI
+- Защита от спама и лимитов
 """
 
+import time
 import logging
 from aiogram import Router, F
 from aiogram.types import Message
@@ -17,23 +20,27 @@ from database.models import CheckIn, TestResult, User
 from sqlalchemy import select
 from datetime import datetime, timedelta
 
-import aiohttp
 from bot.config import GROQ_API_KEY
+from bot.services.ai_explanation import _call_groq
+from bot.services.crisis import is_crisis_text, get_crisis_message
 
 logger = logging.getLogger("chat_handler")
 
 router = Router()
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-
 # Максимум сообщений в истории диалога (пар вопрос-ответ)
 MAX_HISTORY = 6
+
+# Кэш для простого ограничения частоты запросов (User ID -> timestamp последнего запроса)
+_USER_LAST_REQUEST = {}
+USER_COOLDOWN_SECONDS = 2.0
 
 LANG_NAMES = {
     "ru": "русском",
     "kz": "казахском",
     "en": "English",
 }
+
 
 def build_system_prompt(lang: str) -> str:
     lang_name = LANG_NAMES.get(lang, "русском")
@@ -49,7 +56,7 @@ def build_system_prompt(lang: str) -> str:
 Границы (строго):
 - Ты НЕ психолог и НЕ врач — не ставь диагнозы, не назначай лечение
 - Опирайся только на данные которые есть — не придумывай
-- При серьёзных признаках (суицидальные мысли, тяжёлая депрессия) — направляй к специалисту
+- При любых намёках на суицид или причинение себе вреда — НЕМЕДЛЕННО направляй к специалистам и на телефоны доверия
 - Если данных мало — честно скажи об этом
 
 Стиль:
@@ -71,7 +78,7 @@ async def get_user_lang(telegram_id: int) -> str:
 
 
 async def get_user_context(telegram_id: int) -> str:
-    """Собирает контекст пользователя из БД для передачи в промпт."""
+    """Собирает контекст данных пользователя из БД для передачи в промпт."""
     async with AsyncSessionLocal() as session:
         month_ago = datetime.utcnow() - timedelta(days=30)
         week_ago = datetime.utcnow() - timedelta(days=7)
@@ -141,12 +148,26 @@ async def handle_free_text(message: Message, state: FSMContext):
     if current_state:
         return
 
+    # Язык из БД
+    lang = await get_user_lang(message.from_user.id)
+
+    # 1. КРИТИЧЕСКИЙ ПЕРЕХВАТ (SAFETY GUARDRAIL):
+    # Если в сообщении есть триггеры суицида или самоповреждения — мгновенный ответ со службами помощи без AI
+    if is_crisis_text(message.text):
+        logger.warning(f"CRISIS TRIGGER DETECTED for user {message.from_user.id}: {message.text[:50]}")
+        await message.answer(get_crisis_message(lang), parse_mode="HTML")
+        return
+
+    # 2. Защита от спама (Rate Limiting per user)
+    now = time.time()
+    last_req = _USER_LAST_REQUEST.get(message.from_user.id, 0)
+    if now - last_req < USER_COOLDOWN_SECONDS:
+        return
+    _USER_LAST_REQUEST[message.from_user.id] = now
+
     if not GROQ_API_KEY:
         await message.answer("AI-чат временно недоступен.")
         return
-
-    # Язык из БД
-    lang = await get_user_lang(message.from_user.id)
 
     # Контекст данных пользователя
     user_context = await get_user_context(message.from_user.id)
@@ -156,7 +177,6 @@ async def handle_free_text(message: Message, state: FSMContext):
     chat_history = data.get("chat_history", [])
 
     # Добавляем новое сообщение пользователя
-    # Контекст данных передаём только в первом сообщении или если история пустая
     if not chat_history:
         user_content = f"""Данные пользователя:
 {user_context}
@@ -167,41 +187,26 @@ async def handle_free_text(message: Message, state: FSMContext):
 
     chat_history.append({"role": "user", "content": user_content})
 
-    # Обрезаем историю если слишком длинная (MAX_HISTORY пар = MAX_HISTORY*2 сообщений)
+    # Обрезаем историю если слишком длинная
     if len(chat_history) > MAX_HISTORY * 2:
-        # Оставляем первое сообщение (с контекстом данных) + последние N-1 пар
         chat_history = chat_history[:1] + chat_history[-(MAX_HISTORY * 2 - 1):]
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": build_system_prompt(lang)},
-            *chat_history
-        ],
-        "max_tokens": 500,
-        "temperature": 0.8
-    }
+    messages = [
+        {"role": "system", "content": build_system_prompt(lang)},
+        *chat_history
+    ]
 
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
-        async with aiohttp.ClientSession() as session:
-            async with session.post(GROQ_URL, headers=headers, json=payload) as response:
-                if response.status == 200:
-                    data_resp = await response.json()
-                    reply = data_resp["choices"][0]["message"]["content"]
+        reply = await _call_groq(messages=messages, max_tokens=500, temperature=0.8)
 
-                    # Сохраняем ответ в историю
-                    chat_history.append({"role": "assistant", "content": reply})
-                    await state.update_data(chat_history=chat_history)
-
-                    await message.answer(reply)
-                else:
-                    await message.answer("Не удалось получить ответ. Попробуй ещё раз.")
+        if reply:
+            # Проверяем ответ AI на безопасность
+            chat_history.append({"role": "assistant", "content": reply})
+            await state.update_data(chat_history=chat_history)
+            await message.answer(reply)
+        else:
+            await message.answer("Не удалось получить ответ от AI. Попробуй ещё раз через минуту.")
     except Exception as e:
         logger.error(f"Chat handler error: {e}")
-        await message.answer("Что-то пошло не так. Попробуй ещё раз.")
+        await message.answer("Что-то пошло не так при обращении к AI. Попробуй ещё раз.")

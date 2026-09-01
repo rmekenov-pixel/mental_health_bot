@@ -1,15 +1,18 @@
+import asyncio
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aiogram import Bot
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from database.db import AsyncSessionLocal
 from database.models import User, CheckIn, TestResult
 from sqlalchemy import select
 from datetime import datetime, timedelta
 
+logger = logging.getLogger("reminders")
+
 
 async def send_checkin_reminder(bot: Bot):
-    from datetime import datetime, timedelta
     current_hour = datetime.utcnow().hour
 
     async with AsyncSessionLocal() as session:
@@ -22,7 +25,6 @@ async def send_checkin_reminder(bot: Bot):
             hour, minute = map(int, reminder_time.split(":"))
             
             # Конвертируем локальное время пользователя в UTC
-            # Используем offset из профиля или дефолт UTC+5
             utc_offset = user.utc_offset or 5
             utc_hour = (hour - utc_offset) % 24
 
@@ -46,8 +48,11 @@ async def send_checkin_reminder(bot: Bot):
                     "Нажми ✅ Чек-ин",
                     parse_mode="HTML"
                 )
+        except TelegramForbiddenError:
+            # Пользователь заблокировал бота — не спамим ERROR в логи
+            logger.debug(f"User {user.telegram_id} has blocked the bot. Skipping reminder.")
         except Exception as e:
-            logging.error(f"Reminder error for {user.telegram_id}: {e}")
+            logger.error(f"Reminder error for {user.telegram_id}: {e}")
 
 
 async def send_weekly_report(bot: Bot):
@@ -102,14 +107,17 @@ async def send_weekly_report(bot: Bot):
 
             await bot.send_message(user.telegram_id, text, parse_mode="HTML")
 
-            # AI анализ недели
+            # AI анализ недели (с паузой для защиты от Rate Limit Groq API)
             if checkins:
                 from bot.services.ai_explanation import get_ai_weekly_reflection
+                user_lang = user.language or "ru"
+                
                 reflection = await get_ai_weekly_reflection(
                     avg_mood=avg_mood,
                     avg_anxiety=avg_anxiety,
                     avg_energy=avg_energy,
-                    checkin_count=len(checkins)
+                    checkin_count=len(checkins),
+                    lang=user_lang
                 )
                 await bot.send_message(
                     user.telegram_id,
@@ -117,8 +125,13 @@ async def send_weekly_report(bot: Bot):
                     parse_mode="HTML"
                 )
 
+                # Задержка 1.5 секунды между пользователями, чтобы не превысить лимиты API Groq (RPM)
+                await asyncio.sleep(1.5)
+
+        except TelegramForbiddenError:
+            logger.debug(f"User {user.telegram_id} has blocked the bot. Skipping weekly report.")
         except Exception as e:
-            logging.error(f"Weekly report error for {user.telegram_id}: {e}")
+            logger.error(f"Weekly report error for {user.telegram_id}: {e}")
 
 
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
@@ -131,7 +144,7 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         args=[bot]
     )
 
-    # Каждое воскресенье в 19:00 по Астане
+    # Каждое воскресенье в 19:00 по Астане (14:00 UTC)
     scheduler.add_job(
         send_weekly_report,
         CronTrigger(day_of_week="sun", hour=14, minute=0),

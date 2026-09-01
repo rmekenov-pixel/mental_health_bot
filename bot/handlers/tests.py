@@ -6,15 +6,13 @@ from bot.keyboards.test_kb import get_test_choice_keyboard, get_options_keyboard
 from bot.services.scoring import get_test_questions, get_test_options, calculate_score, get_level, calculate_burnout_scores
 from bot.services.ai_explanation import get_ai_explanation
 from bot.services.localization import t, get_user_lang
+from bot.services.crisis import get_crisis_message
 from database.db import AsyncSessionLocal
 from database.models import TestResult
 
 
 router = Router()
 
-# Maps the localized test-choice button text (per language) to the internal
-# test key. Built dynamically from locale files so it never drifts from the
-# button text shown in get_test_choice_keyboard().
 _TEST_BTN_KEYS = {
     "test_btn_phq9": "phq9",
     "test_btn_gad7": "gad7",
@@ -37,8 +35,6 @@ def _build_test_map() -> dict:
 
 TEST_MAP = _build_test_map()
 
-# Test display names per language, used for the TestResult.test_name field
-# and for prompting the AI explanation.
 TEST_DISPLAY_NAMES = {
     "phq9": "PHQ-9",
     "gad7": "GAD-7",
@@ -122,6 +118,9 @@ async def process_answer(message: Message, state: FSMContext):
 
     display_name = TEST_DISPLAY_NAMES.get(test_name, test_name.upper())
 
+    # Проверка на суицидальные маркеры (Вопрос 9 в тесте PHQ-9: index 8)
+    has_suicidal_ideation = (test_name == "phq9" and len(answers) >= 9 and answers[8] > 0)
+
     if test_name == "burnout":
         burnout = calculate_burnout_scores(answers, lang)
         async with AsyncSessionLocal() as session:
@@ -185,6 +184,11 @@ async def process_answer(message: Message, state: FSMContext):
             parse_mode="HTML",
             reply_markup=get_main_keyboard(lang)
         )
+
+        # Если в PHQ-9 был положительный ответ на вопрос о причинении себе вреда или тяжелый балл
+        if has_suicidal_ideation or (test_name == "phq9" and score >= 20):
+            await message.answer(get_crisis_message(lang), parse_mode="HTML")
+
         explanation = await get_ai_explanation(display_name, score, level, lang)
         await message.answer(
             t(lang, "ai_explanation", text=explanation),
