@@ -4,10 +4,10 @@
 Улучшения:
 - Язык берётся из БД (поле User.language)
 - История диалога хранится в FSM (память в рамках сессии)
-- Промпт явно требует отвечать на языке пользователя
+- Промпт требует естественного, грамотного человеческого языка без машинного перевода
 - SAFETY: Немедленный перехват суицидальных кризисов без обращения к AI
 - QUOTA: Суточные лимиты на пользователя (25 бесплатных AI-сообщений в день)
-- MULTI-PROVIDER: Поддержка Google Gemini Flash (1M токенов/мин) и Groq Llama
+- MULTI-PROVIDER: Поддержка Google Gemini Flash и Groq Llama/Qwen с низкой температурой
 """
 
 import time
@@ -22,7 +22,7 @@ from sqlalchemy import select
 from datetime import datetime, timedelta
 
 from bot.config import GROQ_API_KEY, GEMINI_API_KEY
-from bot.services.ai_explanation import _call_ai
+from bot.services.ai_explanation import _call_ai, get_gemini_key, get_groq_key
 from bot.services.crisis import is_crisis_text, get_crisis_message
 from bot.services.quota import check_and_increment_ai_quota, get_limit_exceeded_message
 
@@ -30,10 +30,7 @@ logger = logging.getLogger("chat_handler")
 
 router = Router()
 
-# Максимум сообщений в истории диалога (пар вопрос-ответ)
 MAX_HISTORY = 6
-
-# Кэш для защиты от спама (User ID -> timestamp последнего запроса)
 _USER_LAST_REQUEST = {}
 USER_COOLDOWN_SECONDS = 2.0
 
@@ -46,31 +43,22 @@ LANG_NAMES = {
 
 def build_system_prompt(lang: str) -> str:
     lang_name = LANG_NAMES.get(lang, "русском")
-    return f"""Ты MindCheck — помощник по психологическому самонаблюдению в Telegram.
-
-У тебя есть доступ к данным пользователя: чек-ины (настроение, тревога, энергия, сон) и результаты психологических тестов.
+    return f"""Ты MindCheck — профессиональный, заботливый и умный ассистент по психологическому самонаблюдению в Telegram.
 
 Твоя роль:
-- Отвечать на вопросы пользователя о его состоянии, динамике, результатах тестов
-- Давать конкретные практики самопомощи с инструкцией когда уместно
-- Поддерживать живой разговор — не быть роботом
+- Отвечать на вопросы пользователя о его психологическом состоянии, уровне энергии, сне, тревоге и стрессе.
+- Давать научно доказанные, практичные и конкретные советы (техники КПТ, дыхательные упражнения, гигиена сна, физиологические техники).
+- Говорить как грамотный, внимательный эксперт-друг.
 
-Границы (строго):
-- Ты НЕ психолог и НЕ врач — не ставь диагнозы, не назначай лечение
-- Опирайся только на данные которые есть — не придумывай
-- При любых намёках на суицид или причинение себе вреда — НЕМЕДЛЕННО направляй к специалистам и на телефоны доверия
-- Если данных мало — честно скажи об этом
-
-Стиль:
-- Тепло, конкретно, как умный заботливый друг
-- Короткие ответы (3-5 предложений) если вопрос простой
-- Развёрнуто только если пользователь просит анализ
-
-ВАЖНО: Отвечай ТОЛЬКО на {lang_name} языке. Не переключайся на другие языки ни при каких условиях."""
+СТРОГИЕ ПРАВИЛА КАЧЕСТВА ЯЗЫКА:
+1. Отвечай на чистом, естественном, безупречно грамотном {lang_name} языке.
+2. Категорически запрещены корявые переводы с английского, нелепые выдуманные слова и бессмысленный бред.
+3. Форматируй ответ красиво: используй маркированные списки, короткие понятные абзацы.
+4. Будь конкретен: если советуешь практику — опиши как её сделать прямо сейчас в 2-3 шага.
+5. Ты НЕ врач: не ставь диагнозы и не назначай медикаменты. При остром кризисе мягко советуй живого специалиста."""
 
 
 async def get_user_lang(telegram_id: int) -> str:
-    """Получает язык пользователя из БД."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User).where(User.telegram_id == telegram_id)
@@ -80,7 +68,6 @@ async def get_user_lang(telegram_id: int) -> str:
 
 
 async def get_user_context(telegram_id: int) -> str:
-    """Собирает контекст данных пользователя из БД для передачи в промпт."""
     async with AsyncSessionLocal() as session:
         month_ago = datetime.utcnow() - timedelta(days=30)
         week_ago = datetime.utcnow() - timedelta(days=7)
@@ -142,73 +129,65 @@ async def get_user_context(telegram_id: int) -> str:
 
 @router.message(F.text & ~F.text.startswith('/'))
 async def handle_free_text(message: Message, state: FSMContext):
-    """
-    Перехватывает свободные сообщения, отвечает с контекстом данных пользователя.
-    Хранит историю диалога в FSM на время сессии.
-    """
     current_state = await state.get_state()
     if current_state:
         return
 
-    # Язык из БД
     lang = await get_user_lang(message.from_user.id)
 
-    # 1. КРИТИЧЕСКИЙ ПЕРЕХВАТ (SAFETY GUARDRAIL):
-    # Если в сообщении есть триггеры суицида или самоповреждения — мгновенный ответ со службами помощи без AI
+    # 1. SAFETY: Перехват кризисов
     if is_crisis_text(message.text):
         logger.warning(f"CRISIS TRIGGER DETECTED for user {message.from_user.id}: {message.text[:50]}")
         await message.answer(get_crisis_message(lang), parse_mode="HTML")
         return
 
-    # 2. Защита от флуда (Rate Limiting per user)
+    # 2. Rate limiting
     now = time.time()
     last_req = _USER_LAST_REQUEST.get(message.from_user.id, 0)
     if now - last_req < USER_COOLDOWN_SECONDS:
         return
     _USER_LAST_REQUEST[message.from_user.id] = now
 
-    # 3. Проверка суточного лимита сообщений (Quotas & Monetization Foundation)
+    # 3. Проверка квоты
     allowed, remaining = await check_and_increment_ai_quota(message.from_user.id)
     if not allowed:
         await message.answer(get_limit_exceeded_message(lang), parse_mode="HTML")
         return
 
-    if not GROQ_API_KEY and not GEMINI_API_KEY:
+    if not get_groq_key() and not get_gemini_key():
         await message.answer("AI-чат временно настраивается администратором.")
         return
 
-    # Контекст данных пользователя
     user_context = await get_user_context(message.from_user.id)
 
-    # История диалога из FSM
     data = await state.get_data()
     chat_history = data.get("chat_history", [])
 
-    # Добавляем новое сообщение пользователя
     if not chat_history:
-        user_content = f"""Данные пользователя:
+        user_content = f"""Данные самонаблюдения пользователя:
 {user_context}
 
-Вопрос: {message.text}"""
+Вопрос пользователя: {message.text}"""
     else:
         user_content = message.text
 
-    chat_history.append({"role": "user", "content": user_content})
+    outgoing_history = list(chat_history)
+    outgoing_history.append({"role": "user", "content": user_content})
 
-    # Обрезаем историю если слишком длинная
-    if len(chat_history) > MAX_HISTORY * 2:
-        chat_history = chat_history[:1] + chat_history[-(MAX_HISTORY * 2 - 1):]
+    if len(outgoing_history) > MAX_HISTORY * 2:
+        outgoing_history = outgoing_history[:1] + outgoing_history[-(MAX_HISTORY * 2 - 1):]
 
     messages = [
         {"role": "system", "content": build_system_prompt(lang)},
-        *chat_history
+        *outgoing_history
     ]
 
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
-        reply = await _call_ai(messages=messages, max_tokens=500, temperature=0.8)
+        reply = await _call_ai(messages=messages, max_tokens=600, temperature=0.4)
 
         if reply:
+            chat_history.append({"role": "user", "content": message.text})
             chat_history.append({"role": "assistant", "content": reply})
             await state.update_data(chat_history=chat_history)
             await message.answer(reply)
