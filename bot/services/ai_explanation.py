@@ -19,12 +19,15 @@ def get_gemini_key() -> str:
 _GROQ_ACTIVE_MODELS_CACHE = []
 _TEST_EXPLANATION_CACHE = {}
 
-# Приоритет выбора качественных моделей (70B/32B с отличным русским языком)
+# Приоритет выбора качественных флагманских моделей
 MODEL_PRIORITY = [
+    "openai/gpt-oss-120b",
     "llama-3.3-70b-versatile",
     "deepseek-r1-distill-llama-70b",
-    "llama-3.1-70b-versatile",
+    "qwen/qwen3.6-27b",
     "qwen-2.5-32b",
+    "openai/gpt-oss-20b",
+    "llama-3.1-70b-versatile",
     "llama-3.1-8b-instant",
 ]
 
@@ -55,29 +58,29 @@ _FALLBACK_UNAVAILABLE_REFLECTION = {
 SYSTEM_PROMPT_EXPLANATION = """Ты MindCheck — профессиональный, тёплый и внимательный ассистент по психологическому самонаблюдению.
 
 Твоя роль:
-- Помочь человеку понять результат теста простым, грамотным и ясным языком
-- Предложить 1-2 практические техники доказательной психологии (КПТ, майндфулнес, поведенческая активация)
-- Поддержать и напомнить, что тест — это инструмент самонаблюдения, а не медицинский диагноз
-
-Границы:
-- Пиши на безупречно грамотном, естественном русском языке. Запрещены кальки, машинный перевод и выдуманные слова.
-- Не ставь диагнозы и не назначай лечение.
-- Говори коротко (3-5 предложений), тепло и по делу."""
-
-SYSTEM_PROMPT_REFLECTION = """Ты MindCheck — профессиональный и внимательный ассистент по психологическому самонаблюдению.
-
-Твоя роль:
-- Грамотно и тепло проанализировать недельную динамику состояния человека (настроение, тревога, энергия, сон)
-- Заметить реальные закономерности в цифрах
-- Дать конкретные и практически применимые рекомендации (режим сна, дыхательные практики, управление стрессом)
+- Помочь человеку глубоко и понятно осознать результат теста простым, живым и поддерживающим языком
+- Предложить 1-2 конкретные научно обоснованные практики (КПТ, майндфулнес, дыхательные упражнения, физиологические техники)
+- Напомнить, что тест — это инструмент самонаблюдения, а не медицинский диагноз
 
 Стиль:
-- Безупречная грамматика, живой человеческий язык без штампов, клише и нелепых выражений.
-- Чётко, структурировано (3-5 предложений), опираясь строго на факты."""
+- Пиши тепло, подробно, с заботой и эмпатией.
+- Каждую технику объясняй пошагово: что делать, как дышать, сколько минут выполнять.
+- Обязательно завершай все фразы и выводы до конца."""
+
+SYSTEM_PROMPT_REFLECTION = """Ты MindCheck — чуткий, внимательный и умный ассистент по психологическому самонаблюдению.
+
+Твоя роль:
+- Проанализировать недельную динамику состояния человека (настроение, тревога, энергия, сон)
+- Заметить неочевидные связи и паттерны в показателях
+- Дать развёрнутые, тёплые и практически применимые рекомендации
+
+Стиль:
+- Живой человеческий язык, искренний интерес к благополучию пользователя.
+- Конкретные пошаговые техники доказательной психологии.
+- Всегда заканчивай мысль и сообщение логичным финалом."""
 
 
 def normalize_messages(messages: list) -> tuple[str, list]:
-    """Нормализует список сообщений и объединяет последовательные реплики одного автора."""
     system_text = ""
     turns = []
 
@@ -105,7 +108,7 @@ def normalize_messages(messages: list) -> tuple[str, list]:
 
 
 async def _get_live_groq_models(groq_key: str) -> list[str]:
-    """Запрашивает актуальный список моделей у Groq и сортирует по качеству русского языка."""
+    """Запрашивает актуальный список моделей у Groq и фильтрует аудио/специализированные модели."""
     global _GROQ_ACTIVE_MODELS_CACHE
     if _GROQ_ACTIVE_MODELS_CACHE:
         return _GROQ_ACTIVE_MODELS_CACHE
@@ -118,20 +121,21 @@ async def _get_live_groq_models(groq_key: str) -> list[str]:
                     data = await resp.json()
                     raw_ids = [m["id"] for m in data.get("data", []) if m.get("active", True)]
                     
-                    # Сортируем: сначала проверенные 70B/32B модели
+                    # Исключаем аудио, vision, guard и tts модели
+                    chat_only = [m for m in raw_ids if not any(x in m.lower() for x in ["whisper", "guard", "vision", "embed", "orpheus", "tts", "stt", "mixtral"])]
+
                     sorted_models = []
                     for preferred in MODEL_PRIORITY:
-                        if preferred in raw_ids:
+                        if preferred in chat_only:
                             sorted_models.append(preferred)
                     
-                    # Добавляем остальные чат-модели
-                    for m_id in raw_ids:
-                        if m_id not in sorted_models and not any(x in m_id for x in ["whisper", "guard", "vision", "embed", "mixtral"]):
+                    for m_id in chat_only:
+                        if m_id not in sorted_models:
                             sorted_models.append(m_id)
 
                     if sorted_models:
                         _GROQ_ACTIVE_MODELS_CACHE = sorted_models
-                        logger.info(f"Groq models sorted by quality: {sorted_models[:4]}")
+                        logger.info(f"Groq chat models prioritized: {sorted_models[:4]}")
                         return sorted_models
     except Exception as e:
         logger.error(f"Failed to fetch live Groq models: {e}")
@@ -139,7 +143,7 @@ async def _get_live_groq_models(groq_key: str) -> list[str]:
     return MODEL_PRIORITY
 
 
-async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature: float = 0.4) -> tuple[str, str]:
+async def _call_gemini_native(messages: list, max_tokens: int = 1200, temperature: float = 0.6) -> tuple[str, str]:
     gemini_key = get_gemini_key()
     if not gemini_key:
         return None, "Key not found"
@@ -170,7 +174,7 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
         "Content-Type": "application/json"
     }
 
-    timeout = aiohttp.ClientTimeout(total=20)
+    timeout = aiohttp.ClientTimeout(total=25)
     last_err = "Unknown error"
 
     for model in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
@@ -198,7 +202,7 @@ async def _call_gemini_native(messages: list, max_tokens: int = 500, temperature
     return None, last_err
 
 
-async def _call_groq(messages: list, max_tokens: int = 500, temperature: float = 0.4) -> tuple[str, str]:
+async def _call_groq(messages: list, max_tokens: int = 1200, temperature: float = 0.6) -> tuple[str, str]:
     groq_key = get_groq_key()
     if not groq_key:
         return None, "Key not found"
@@ -213,7 +217,7 @@ async def _call_groq(messages: list, max_tokens: int = 500, temperature: float =
         "Authorization": f"Bearer {groq_key}",
         "Content-Type": "application/json"
     }
-    timeout = aiohttp.ClientTimeout(total=20)
+    timeout = aiohttp.ClientTimeout(total=25)
     last_err = "Unknown error"
 
     models_to_try = await _get_live_groq_models(groq_key)
@@ -223,7 +227,7 @@ async def _call_groq(messages: list, max_tokens: int = 500, temperature: float =
             "model": model,
             "messages": clean_messages,
             "max_tokens": max_tokens,
-            "temperature": temperature  # Низкая температура 0.4 для идеальной грамматики
+            "temperature": temperature
         }
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -242,10 +246,11 @@ async def _call_groq(messages: list, max_tokens: int = 500, temperature: float =
     return None, last_err
 
 
-async def _call_ai(messages: list, max_tokens: int = 500, temperature: float = 0.4) -> str:
+async def _call_ai(messages: list, max_tokens: int = 1200, temperature: float = 0.6) -> str:
     """
     Главная точка входа в AI.
-    Использует умеренную температуру 0.4 для строгой связности и чистой грамматики.
+    Использует max_tokens=1200 для полных, развёрнутых и незавершённых ответов,
+    и temperature=0.6 для тёплого, естественного тона.
     """
     if get_gemini_key():
         res, _ = await _call_gemini_native(messages, max_tokens, temperature)
@@ -298,9 +303,9 @@ async def get_ai_explanation(test_name: str, score: int, level: str, lang: str =
 
     prompt = f"""Пользователь прошёл тест "{test_name}" и получил {score} баллов. Уровень: {level}.
 
-Напиши понятное объяснение на чистом, грамотном {lang_name} языке (3-4 предложения):
-1. Что означает этот результат простыми словами
-2. 1-2 конкретные научно доказанные практики (КПТ, дыхание, режим)
+Напиши понятное, поддерживающее и полезное объяснение на грамотном {lang_name} языке:
+1. Что означает этот результат простыми словами и почему не стоит паниковать
+2. 2 конкретные научно доказанные практики с подробной инструкцией (как делать прямо сейчас)
 3. Напоминание, что это самонаблюдение, а не диагноз"""
 
     messages = [
@@ -308,7 +313,7 @@ async def get_ai_explanation(test_name: str, score: int, level: str, lang: str =
         {"role": "user", "content": prompt}
     ]
 
-    result = await _call_ai(messages=messages, max_tokens=400, temperature=0.4)
+    result = await _call_ai(messages=messages, max_tokens=900, temperature=0.6)
     if result:
         _TEST_EXPLANATION_CACHE[cache_key] = result
         return result
@@ -322,19 +327,20 @@ async def get_ai_weekly_reflection(avg_mood: float, avg_anxiety: float, avg_ener
 
     lang_name = _LANG_NAMES.get(lang, _LANG_NAMES["ru"])
 
-    prompt = f"""Пользователь делал чек-ин {checkin_count} дней за неделю.
+    prompt = f"""Пользователь отслеживал своё состояние {checkin_count} дней за неделю.
 Средние показатели: настроение {avg_mood:.1f}/10, тревога {avg_anxiety:.1f}/10, энергия {avg_energy:.1f}/10.
 
-Напиши анализ недели на безупречном {lang_name} языке (3-4 предложения):
-1. Что означают эти показатели для состояния человека
-2. На что обратить внимание и какую одну конкретную практику применить"""
+Напиши тёплый, глубокий и полезный анализ недели на прекрасном {lang_name} языке:
+1. Честный разбор этих показателей: что они значат и какие паттерны заметны
+2. 2 точечные практики под его уровень энергии и тревоги с понятной инструкцией
+3. Тёплые слова поддержки на предстоящую неделю"""
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT_REFLECTION},
         {"role": "user", "content": prompt}
     ]
 
-    result = await _call_ai(messages=messages, max_tokens=400, temperature=0.4)
+    result = await _call_ai(messages=messages, max_tokens=1000, temperature=0.6)
     if result:
         return result
 
