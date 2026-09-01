@@ -114,14 +114,15 @@ async def cmd_ai_status(message: Message):
     msg = await message.answer("🔄 Проверяю подключение к AI провайдерам...")
     diag = await test_ai_connection()
 
-    gemini_key_str = f"✅ ({diag['gemini_key_mask']})" if diag["gemini_key_present"] else "❌ Не найден"
-    groq_key_str = f"✅ ({diag['groq_key_mask']})" if diag["groq_key_present"] else "❌ Не найден"
+    gemini_key_str = f"✅ ({diag['gemini_key_mask']})" if diag["gemini_key_present"] else "❌ Не найден в контейнере"
+    groq_key_str = f"✅ ({diag['groq_key_mask']})" if diag["groq_key_present"] else "❌ Не найден в контейнере"
 
     text = (
         "🔍 <b>Диагностика AI подключения:</b>\n\n"
         f"• <b>Google Gemini API Key:</b> {gemini_key_str}\n"
         f"  Статус: {diag['gemini_status']}\n\n"
         f"• <b>Groq API Key:</b> {groq_key_str}\n"
-        f"  Статус: {diag['groq_status']}"
+        f"  Статус: {diag['groq_status']}\n\n"
+        f"📋 <i>Переменные, видимые в контейнере:</i>\n<code>{diag['detected_env_names']}</code>"
     )
     await msg.edit_text(text, parse_mode="HTML")

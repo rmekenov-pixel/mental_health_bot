@@ -2,7 +2,8 @@
 Обработчик свободных сообщений — "умный чат" с MindCheck.
 
 Улучшения:
-- Развёрнутые, глубокие и практически применимые ответы без обрезки сообщений (max_tokens=1200)
+- Развёрнутые, глубокие и практически применимые ответы без обрезки сообщений (max_tokens=2500)
+- Автоматическое разбиение длинных сообщений (>3900 символов) на части
 - Тёплый, поддерживающий тон с конкретными пошаговыми техниками (КПТ, дыхание, сон, энергия)
 - SAFETY: Немедленный перехват суицидальных кризисов без обращения к AI
 - QUOTA: Суточные лимиты на пользователя (25 бесплатных AI-сообщений в день)
@@ -41,15 +42,15 @@ LANG_NAMES = {
 
 def build_system_prompt(lang: str) -> str:
     lang_name = LANG_NAMES.get(lang, "русском")
-    return f"""Ты MindCheck — тёплый, внимательный и профессиональный ассистент по психологическому самонаблюдению в Telegram.
+    return f"""Ты MindCheck — тёплый, внимательный и высококвалифицированный ассистент по психологическому самонаблюдению в Telegram.
 
 Твоя главная цель — дать человеку действительно работающую, глубокую и понятную помощь, основанную на доказательной психологии (КПТ, физиология стресса, гигиена сна, майндфулнес).
 
 ПРАВИЛА ОТВЕТА:
 1. Пиши на безупречно красивом, естественном и живом {lang_name} языке. Никаких сухих шаблонов и роботизированных фраз.
 2. Будь МАКСИМАЛЬНО КОНКРЕТЕН: не говори общими словами вроде "отдыхай" или "питайся правильно". Давай конкретные шаги и инструкции:
-   - Если советуешь технику — опиши: 1) как сесть/встать, 2) как дышать (счёт секунд), 3) сколько минут делать.
-   - Если вопрос про энергию и сон — объясняй физиологическую причину (кортизол, дофамин, фазы глубокого сна) и давай альтернативы (без клише).
+   - Если советуешь практику — опиши: 1) как сесть/встать, 2) как дышать (счёт секунд), 3) сколько минут делать.
+   - Если пользователь просит план (на 3, 5, 7 дней) — распиши каждый шаг последовательно и лаконично, чтобы уложиться в рамки и не бросать текст на полуслове.
 3. Форматируй сообщение красиво: используй понятные списки, жирный шрифт для ключевых мыслей и разделители.
 4. ВСЕГДА заканчивай ответ логичным завершением и словами поддержки. Никогда не обрывай фразы.
 5. Ты НЕ врач: не ставь диагнозы и не назначай препараты. Если видишь признаки острого кризиса — мягко порекомендуй специалиста."""
@@ -124,6 +125,28 @@ async def get_user_context(telegram_id: int) -> str:
     return "\n".join(lines)
 
 
+async def send_smart_long_message(message: Message, text: str):
+    """Отправляет сообщение, автоматически разделяя на части при превышении лимита Telegram (3900 символов)."""
+    if len(text) <= 3900:
+        await message.answer(text)
+        return
+
+    # Разбиваем по разделителям или параграфам
+    parts = text.split("\n\n")
+    current_chunk = ""
+
+    for p in parts:
+        if len(current_chunk) + len(p) + 2 < 3900:
+            current_chunk += ("\n\n" if current_chunk else "") + p
+        else:
+            if current_chunk:
+                await message.answer(current_chunk)
+            current_chunk = p
+
+    if current_chunk:
+        await message.answer(current_chunk)
+
+
 @router.message(F.text & ~F.text.startswith('/'))
 async def handle_free_text(message: Message, state: FSMContext):
     current_state = await state.get_state()
@@ -161,7 +184,7 @@ async def handle_free_text(message: Message, state: FSMContext):
     chat_history = data.get("chat_history", [])
 
     if not chat_history:
-        user_content = f"""Данные самонаблюдения пользователя за последние дни:
+        user_content = f"""Данные самонаблюдения пользователя:
 {user_context}
 
 Вопрос пользователя: {message.text}"""
@@ -181,13 +204,13 @@ async def handle_free_text(message: Message, state: FSMContext):
 
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
-        reply = await _call_ai(messages=messages, max_tokens=1200, temperature=0.6)
+        reply = await _call_ai(messages=messages, max_tokens=2500, temperature=0.6)
 
         if reply:
             chat_history.append({"role": "user", "content": message.text})
             chat_history.append({"role": "assistant", "content": reply})
             await state.update_data(chat_history=chat_history)
-            await message.answer(reply)
+            await send_smart_long_message(message, reply)
         else:
             await message.answer("Не удалось получить ответ от AI. Попробуй ещё раз через минуту.")
     except Exception as e:

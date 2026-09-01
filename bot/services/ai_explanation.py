@@ -1,3 +1,4 @@
+import os
 import aiohttp
 import logging
 import bot.config as cfg
@@ -9,12 +10,26 @@ GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 GEMINI_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
 def get_groq_key() -> str:
-    key = cfg.GROQ_API_KEY or ""
-    return key.strip().strip('"').strip("'")
+    # Динамический поиск ключа Groq
+    for k in ["GROQ_API_KEY", "GROQ_KEY", "GROQ_TOKEN", "GROQ"]:
+        val = os.environ.get(k)
+        if val:
+            return val.strip().strip('"').strip("'")
+    for k, v in os.environ.items():
+        if "groq" in k.lower() and v and len(v.strip()) > 10:
+            return v.strip().strip('"').strip("'")
+    return (cfg.GROQ_API_KEY or "").strip().strip('"').strip("'")
 
 def get_gemini_key() -> str:
-    key = cfg.GEMINI_API_KEY or ""
-    return key.strip().strip('"').strip("'")
+    # Динамический поиск ключа Gemini
+    for k in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_KEY", "GOOGLE_GEMINI_API_KEY", "GEMINI_TOKEN", "GEMINI", "GOOGLE_KEY"]:
+        val = os.environ.get(k)
+        if val:
+            return val.strip().strip('"').strip("'")
+    for k, v in os.environ.items():
+        if ("gemini" in k.lower() or "google" in k.lower()) and v and len(v.strip()) > 10:
+            return v.strip().strip('"').strip("'")
+    return (cfg.GEMINI_API_KEY or "").strip().strip('"').strip("'")
 
 _GROQ_ACTIVE_MODELS_CACHE = []
 _TEST_EXPLANATION_CACHE = {}
@@ -108,7 +123,6 @@ def normalize_messages(messages: list) -> tuple[str, list]:
 
 
 async def _get_live_groq_models(groq_key: str) -> list[str]:
-    """Запрашивает актуальный список моделей у Groq и фильтрует аудио/специализированные модели."""
     global _GROQ_ACTIVE_MODELS_CACHE
     if _GROQ_ACTIVE_MODELS_CACHE:
         return _GROQ_ACTIVE_MODELS_CACHE
@@ -121,7 +135,6 @@ async def _get_live_groq_models(groq_key: str) -> list[str]:
                     data = await resp.json()
                     raw_ids = [m["id"] for m in data.get("data", []) if m.get("active", True)]
                     
-                    # Исключаем аудио, vision, guard и tts модели
                     chat_only = [m for m in raw_ids if not any(x in m.lower() for x in ["whisper", "guard", "vision", "embed", "orpheus", "tts", "stt", "mixtral"])]
 
                     sorted_models = []
@@ -143,7 +156,7 @@ async def _get_live_groq_models(groq_key: str) -> list[str]:
     return MODEL_PRIORITY
 
 
-async def _call_gemini_native(messages: list, max_tokens: int = 1200, temperature: float = 0.6) -> tuple[str, str]:
+async def _call_gemini_native(messages: list, max_tokens: int = 2500, temperature: float = 0.6) -> tuple[str, str]:
     gemini_key = get_gemini_key()
     if not gemini_key:
         return None, "Key not found"
@@ -174,7 +187,7 @@ async def _call_gemini_native(messages: list, max_tokens: int = 1200, temperatur
         "Content-Type": "application/json"
     }
 
-    timeout = aiohttp.ClientTimeout(total=25)
+    timeout = aiohttp.ClientTimeout(total=30)
     last_err = "Unknown error"
 
     for model in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
@@ -199,10 +212,38 @@ async def _call_gemini_native(messages: list, max_tokens: int = 1200, temperatur
             except Exception as e:
                 last_err = str(e)
 
+    # Запасной OpenAI-совместимый эндпоинт
+    openai_messages = []
+    if system_text:
+        openai_messages.append({"role": "system", "content": system_text})
+    openai_messages.extend(turns)
+
+    headers_openai = {
+        "Authorization": f"Bearer {gemini_key}",
+        "Content-Type": "application/json"
+    }
+    payload_openai = {
+        "model": "gemini-1.5-flash",
+        "messages": openai_messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature
+    }
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(GEMINI_OPENAI_URL, headers=headers_openai, json=payload_openai) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"].strip(), None
+                else:
+                    err_body = await response.text()
+                    last_err = f"OpenAI-compat HTTP {response.status}: {err_body[:100]}"
+    except Exception as e:
+        last_err = str(e)
+
     return None, last_err
 
 
-async def _call_groq(messages: list, max_tokens: int = 1200, temperature: float = 0.6) -> tuple[str, str]:
+async def _call_groq(messages: list, max_tokens: int = 2500, temperature: float = 0.6) -> tuple[str, str]:
     groq_key = get_groq_key()
     if not groq_key:
         return None, "Key not found"
@@ -217,7 +258,7 @@ async def _call_groq(messages: list, max_tokens: int = 1200, temperature: float 
         "Authorization": f"Bearer {groq_key}",
         "Content-Type": "application/json"
     }
-    timeout = aiohttp.ClientTimeout(total=25)
+    timeout = aiohttp.ClientTimeout(total=30)
     last_err = "Unknown error"
 
     models_to_try = await _get_live_groq_models(groq_key)
@@ -246,11 +287,10 @@ async def _call_groq(messages: list, max_tokens: int = 1200, temperature: float 
     return None, last_err
 
 
-async def _call_ai(messages: list, max_tokens: int = 1200, temperature: float = 0.6) -> str:
+async def _call_ai(messages: list, max_tokens: int = 2500, temperature: float = 0.6) -> str:
     """
     Главная точка входа в AI.
-    Использует max_tokens=1200 для полных, развёрнутых и незавершённых ответов,
-    и temperature=0.6 для тёплого, естественного тона.
+    Большой лимит токенов (2500) предотвращает обрезку длинных планов и анализов.
     """
     if get_gemini_key():
         res, _ = await _call_gemini_native(messages, max_tokens, temperature)
@@ -269,6 +309,9 @@ async def test_ai_connection() -> dict:
     gemini_key = get_gemini_key()
     groq_key = get_groq_key()
 
+    # Собираем список всех переменных для наглядной диагностики Railway
+    all_env_keys = sorted([k for k in os.environ.keys() if not k.startswith("_")])
+
     results = {
         "gemini_key_present": bool(gemini_key),
         "groq_key_present": bool(groq_key),
@@ -276,6 +319,7 @@ async def test_ai_connection() -> dict:
         "groq_status": "Not configured",
         "gemini_key_mask": f"{gemini_key[:6]}...{gemini_key[-4:]}" if len(gemini_key) > 10 else ("Set" if gemini_key else "Missing"),
         "groq_key_mask": f"{groq_key[:6]}...{groq_key[-4:]}" if len(groq_key) > 10 else ("Set" if groq_key else "Missing"),
+        "detected_env_names": ", ".join(all_env_keys[:12])
     }
 
     test_messages = [{"role": "user", "content": "Ответь одним словом: Работает"}]
@@ -313,7 +357,7 @@ async def get_ai_explanation(test_name: str, score: int, level: str, lang: str =
         {"role": "user", "content": prompt}
     ]
 
-    result = await _call_ai(messages=messages, max_tokens=900, temperature=0.6)
+    result = await _call_ai(messages=messages, max_tokens=1500, temperature=0.6)
     if result:
         _TEST_EXPLANATION_CACHE[cache_key] = result
         return result
@@ -340,7 +384,7 @@ async def get_ai_weekly_reflection(avg_mood: float, avg_anxiety: float, avg_ener
         {"role": "user", "content": prompt}
     ]
 
-    result = await _call_ai(messages=messages, max_tokens=1000, temperature=0.6)
+    result = await _call_ai(messages=messages, max_tokens=1500, temperature=0.6)
     if result:
         return result
 
