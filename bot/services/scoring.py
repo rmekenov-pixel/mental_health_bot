@@ -18,6 +18,25 @@ def calculate_score(answers: list[int]) -> int:
     return sum(answers)
 
 
+def calculate_self_esteem_scores(answers: list[int]) -> int:
+    """
+    Расчёт по классической шкале самооценки Розенберга.
+    Прямые вопросы (индексы 0, 2, 3, 6, 9): 3, 2, 1, 0
+    Обратные вопросы (индексы 1, 4, 5, 7, 8): 0, 1, 2, 3
+    """
+    reverse_indices = {1, 4, 5, 7, 8}
+    total = 0
+    for i, ans in enumerate(answers):
+        # ans: 0="Полностью согласен(3)", 1="Согласен(2)", 2="Не согласен(1)", 3="Полностью не согласен(0)"
+        direct_val = 3 - ans
+        if i in reverse_indices:
+            score = 3 - direct_val
+        else:
+            score = direct_val
+        total += score
+    return total
+
+
 def calculate_burnout_scores(answers: list[int], lang: str = "ru") -> dict:
     test = load_test("burnout", lang)
     subscales = test["subscales"]

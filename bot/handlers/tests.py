@@ -3,7 +3,14 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from bot.states.test_states import TestStates
 from bot.keyboards.test_kb import get_test_choice_keyboard, get_options_keyboard, get_main_keyboard
-from bot.services.scoring import get_test_questions, get_test_options, calculate_score, get_level, calculate_burnout_scores
+from bot.services.scoring import (
+    get_test_questions,
+    get_test_options,
+    calculate_score,
+    calculate_self_esteem_scores,
+    get_level,
+    calculate_burnout_scores
+)
 from bot.services.ai_explanation import get_ai_explanation
 from bot.services.localization import t, get_user_lang
 from bot.services.crisis import get_crisis_message
@@ -44,6 +51,16 @@ TEST_DISPLAY_NAMES = {
 }
 
 
+def _format_question_text(lang: str, current: int, total: int, question: str, options: list[str]) -> str:
+    """Форматирует текст вопроса вместе с пронумерованными вариантами ответа."""
+    opt_lines = "\n".join(f"  <b>{i+1}.</b> {opt}" for i, opt in enumerate(options))
+    return (
+        f"❓ <b>Вопрос {current} из {total}:</b>\n\n"
+        f"<i>{question}</i>\n\n"
+        f"<b>Варианты ответа (выбери кнопку внизу или отправь цифру 1-{len(options)}):</b>\n{opt_lines}"
+    )
+
+
 @router.message(F.text.in_({t(lang, "btn_test") for lang in ("ru", "kz", "en")}))
 async def choose_test(message: Message, state: FSMContext):
     lang = await get_user_lang(message.from_user.id)
@@ -75,9 +92,9 @@ async def start_test(message: Message, state: FSMContext):
 
     keyboard = get_options_keyboard(options)
 
-    intro = t(
-        lang, "test_intro",
-        current=1, total=len(questions), question=questions[0]
+    intro = (
+        f"📋 <b>Оцени своё состояние за последние 2 недели.</b>\n\n" +
+        _format_question_text(lang, 1, len(questions), questions[0], options)
     )
     if lang == "kz":
         intro = t(lang, "kz_validation_disclaimer_intro") + intro
@@ -93,26 +110,67 @@ async def start_test(message: Message, state: FSMContext):
 async def process_answer(message: Message, state: FSMContext):
     lang = await get_user_lang(message.from_user.id)
     data = await state.get_data()
-    test_name = data["test_name"]
-    questions = data["questions"]
+    test_name = data.get("test_name")
+    questions = data.get("questions")
+
+    if not test_name or not questions:
+        await state.clear()
+        await message.answer("Сессия теста завершена. Нажмите «Пройти тест» для начала.", reply_markup=get_main_keyboard(lang))
+        return
 
     options = get_test_options(test_name, lang)
     keyboard = get_options_keyboard(options)
 
-    try:
-        answer_value = options.index(message.text)
-    except ValueError:
-        await message.answer(t(lang, "test_invalid"))
+    # Умный разбор ответа (поддержка кнопок, цифр 1..N, цифр в скобках, частичного текста)
+    matched_idx = None
+    user_text = message.text.strip()
+
+    # 1. Точное совпадение с кнопкой
+    if user_text in options:
+        matched_idx = options.index(user_text)
+
+    # 2. Ввод цифры (например '1', '2', '3', '4' или '0', '1', '2', '3')
+    elif user_text.isdigit():
+        num = int(user_text)
+        # Если ввели порядковый номер (1..N)
+        if 1 <= num <= len(options):
+            matched_idx = num - 1
+        # Если ввели балл (0..N-1)
+        elif 0 <= num < len(options):
+            # Ищем опцию, где в скобках указан этот балл
+            for idx, opt in enumerate(options):
+                if f"({num})" in opt:
+                    matched_idx = idx
+                    break
+            if matched_idx is None:
+                matched_idx = num
+
+    # 3. Ввод частичного текста (например "полностью согласен" или "не согласен")
+    if matched_idx is None:
+        user_lower = user_text.lower()
+        for idx, opt in enumerate(options):
+            opt_clean = opt.lower().split("(")[0].strip()
+            if user_lower == opt_clean or user_lower in opt.lower():
+                matched_idx = idx
+                break
+
+    if matched_idx is None:
+        await message.answer(
+            f"⚠️ Пожалуйста, выберите один из вариантов кнопками ниже или отправьте цифру от 1 до {len(options)}.",
+            reply_markup=keyboard
+        )
         return
 
-    answers = data["answers"] + [answer_value]
+    answers = data["answers"] + [matched_idx]
     current = data["current_question"] + 1
 
     if current < len(questions):
         await state.update_data(answers=answers, current_question=current)
+        question_text = _format_question_text(lang, current + 1, len(questions), questions[current], options)
         await message.answer(
-            t(lang, "test_question", current=current + 1, total=len(questions), question=questions[current]),
-            reply_markup=keyboard
+            question_text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
         )
         return
 
@@ -160,7 +218,11 @@ async def process_answer(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
     else:
-        score = calculate_score(answers)
+        if test_name == "self_esteem":
+            score = calculate_self_esteem_scores(answers)
+        else:
+            score = calculate_score(answers)
+
         level = get_level(test_name, score, lang)
 
         async with AsyncSessionLocal() as session:
@@ -185,7 +247,6 @@ async def process_answer(message: Message, state: FSMContext):
             reply_markup=get_main_keyboard(lang)
         )
 
-        # Если в PHQ-9 был положительный ответ на вопрос о причинении себе вреда или тяжелый балл
         if has_suicidal_ideation or (test_name == "phq9" and score >= 20):
             await message.answer(get_crisis_message(lang), parse_mode="HTML")
 
