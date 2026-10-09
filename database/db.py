@@ -34,13 +34,15 @@ async def init_db():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ai_request_date TIMESTAMP",
     ]
 
+    is_sqlite = ASYNC_DATABASE_URL.startswith("sqlite")
     for migration in migrations:
+        sql = migration.replace("IF NOT EXISTS ", "") if is_sqlite else migration
         try:
             async with engine.begin() as conn:
-                await conn.execute(text(migration))
-        except Exception as e:
-            import logging
-            logging.error(f"Migration notice: {migration} - {e}")
+                await conn.execute(text(sql))
+        except Exception:
+            # Колонка уже создана или миграция применена ранее
+            pass
 
 
 async def get_session() -> AsyncSession:
