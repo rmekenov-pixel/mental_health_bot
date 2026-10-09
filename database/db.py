@@ -9,12 +9,14 @@ if DATABASE_URL.startswith("sqlite"):
     ASYNC_DATABASE_URL = DATABASE_URL.replace("sqlite://", "sqlite+aiosqlite://")
 elif DATABASE_URL.startswith("postgres://"):
     ASYNC_DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
-elif DATABASE_URL.startswith("postgresql://"):
-    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 else:
     ASYNC_DATABASE_URL = DATABASE_URL
 
-engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
+engine_kwargs = {"echo": False}
+if ASYNC_DATABASE_URL.startswith("sqlite"):
+    engine_kwargs["connect_args"] = {"timeout": 20}
+
+engine = create_async_engine(ASYNC_DATABASE_URL, **engine_kwargs)
 
 AsyncSessionLocal = sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
@@ -30,6 +32,7 @@ async def init_db():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS utc_offset INTEGER DEFAULT 5",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR DEFAULT 'ru'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_until TIMESTAMP",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_ai_count INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ai_request_date TIMESTAMP",
     ]

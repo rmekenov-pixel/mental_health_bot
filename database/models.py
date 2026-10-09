@@ -17,6 +17,7 @@ class User(Base):
     utc_offset = Column(Integer, nullable=True, default=5)
     language = Column(String, nullable=True, default="ru")
     is_premium = Column(Boolean, default=False)
+    premium_until = Column(DateTime, nullable=True)
     daily_ai_count = Column(Integer, default=0)
     last_ai_request_date = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

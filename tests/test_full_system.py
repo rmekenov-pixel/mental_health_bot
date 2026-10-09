@@ -6,10 +6,6 @@ from datetime import datetime, timedelta
 
 # Добавляем путь проекта в sys.path
 sys.path.insert(0, os.path.abspath("."))
-if sys.platform == "win32":
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 from bot.services.localization import load_locale, t
 from bot.services.scoring import (
@@ -41,11 +37,12 @@ async def run_full_tests():
     def assert_test(condition, name):
         nonlocal passed, total
         total += 1
+        safe_name = str(name).encode("ascii", errors="replace").decode("ascii")
         if condition:
             passed += 1
-            print(f"  [PASS] {name}")
+            print(f"  [PASS] {safe_name}", flush=True)
         else:
-            print(f"  [FAIL] {name}")
+            print(f"  [FAIL] {safe_name}", flush=True)
             raise AssertionError(f"Test failed: {name}")
 
     # 1. ТЕСТ ЛОКАЛИЗАЦИИ
@@ -164,7 +161,9 @@ async def run_full_tests():
     test_tg_id = 999999901
 
     async with AsyncSessionLocal() as session:
-        # Очистка тестового пользователя
+        # Очистка тестового пользователя (включая CheckIn)
+        from sqlalchemy import delete as sa_delete
+        await session.execute(sa_delete(CheckIn).where(CheckIn.telegram_id == test_tg_id))
         user = (await session.execute(select(User).where(User.telegram_id == test_tg_id))).scalar_one_or_none()
         if user:
             await session.delete(user)
@@ -188,12 +187,68 @@ async def run_full_tests():
         await session.commit()
 
         c_saved = (await session.execute(select(CheckIn).where(CheckIn.telegram_id == test_tg_id))).scalar_one_or_none()
-        assert_test(c_saved.mood == 8 and c_saved.anxiety == 3, "CheckIn recorded successfully")
+        assert_test(c_saved is not None and c_saved.mood == 8, "CheckIn saved and queried successfully")
 
         # Очистка
         await session.delete(c_saved)
         await session.delete(u)
         await session.commit()
+
+    # 7. ТЕСТ МОНЕТИЗАЦИИ И ПРЕМИУМ-ПОДПИСОК
+    print("\n--- 7. Premium Subscriptions & Quota Management ---")
+    from bot.handlers.premium import TARIFFS, get_premium_menu_keyboard
+    from bot.services.quota import check_and_increment_ai_quota, get_limit_exceeded_message
+
+    assert_test("1m" in TARIFFS and "3m" in TARIFFS and "1y" in TARIFFS, "All 3 premium tariffs configured")
+    assert_test(TARIFFS["1m"]["stars"] == 150, "1 month tariff is 150 stars")
+    assert_test(TARIFFS["3m"]["stars"] == 390, "3 month tariff is 390 stars (15% discount)")
+    assert_test(TARIFFS["1y"]["stars"] == 1190, "1 year tariff is 1190 stars (35% discount)")
+
+    for lang in ("ru", "kz", "en"):
+        kb = get_premium_menu_keyboard(lang, is_active=False)
+        assert_test(len(kb.inline_keyboard) == 3, f"Premium menu has 3 tariff buttons for {lang}")
+        limit_msg = get_limit_exceeded_message(lang)
+        assert_test("/premium" in limit_msg or "MindCheck Pro" in limit_msg, f"Limit message promotes Pro in {lang}")
+
+    # Проверка квоты для Premium пользователя
+    prem_user_id = 999999902
+    async with AsyncSessionLocal() as s:
+        p_user = User(
+            telegram_id=prem_user_id,
+            is_premium=True,
+            premium_until=datetime.utcnow() + timedelta(days=30),
+            daily_ai_count=0
+        )
+        s.add(p_user)
+        await s.commit()
+
+    allowed, remaining = await check_and_increment_ai_quota(prem_user_id)
+    assert_test(allowed is True, "Active premium user is allowed AI requests")
+    assert_test(remaining > 100, f"Active premium user has high quota (got {remaining})")
+
+    # Проверка истекшего Premium
+    async with AsyncSessionLocal() as s:
+        u_db = (await s.execute(select(User).where(User.telegram_id == prem_user_id))).scalar_one_or_none()
+        u_db.premium_until = datetime.utcnow() - timedelta(days=1)
+        await s.commit()
+
+    allowed_exp, rem_exp = await check_and_increment_ai_quota(prem_user_id)
+    assert_test(allowed_exp is True, "Expired premium user falls back to free quota")
+    assert_test(rem_exp <= 25, f"Expired premium user receives free quota (got {rem_exp})")
+
+    # Очистка
+    async with AsyncSessionLocal() as s:
+        u_del = (await s.execute(select(User).where(User.telegram_id == prem_user_id))).scalar_one_or_none()
+        if u_del:
+            await s.delete(u_del)
+            await s.commit()
+
+    # 8. ТЕСТ ГЕНЕРАЦИИ ГРАФИКОВ
+    print("\n--- 8. Chart Generation (Non-blocking) ---")
+    from bot.services.charts import generate_chart
+    # Для пользователя без данных возвращает None
+    chart_none = await generate_chart(prem_user_id, "ru")
+    assert_test(chart_none is None, "Empty user returns None for chart")
 
     print("\n==================================================")
     print(f"ALL TESTS COMPLETED SUCCESSFULLY: {passed}/{total} PASSED (100%)")

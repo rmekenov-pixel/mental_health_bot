@@ -12,21 +12,27 @@ from bot.config import DAILY_FREE_AI_LIMIT
 
 _LIMIT_EXCEEDED_MESSAGES = {
     "ru": (
-        "⏳ <b>Дневной лимит AI-сообщений исчерпан</b>\n\n"
+        "⏳ <b>Дневной лимит бесплатных AI-сообщений исчерпан</b>\n\n"
         f"Ты использовал все {DAILY_FREE_AI_LIMIT} бесплатных обращений к AI на сегодня. "
         "Лимит обновится завтра утром.\n\n"
+        "⭐ <b>Хочешь общаться без ограничений?</b>\n"
+        "Переходи на <b>MindCheck Pro</b> — команда /premium\n\n"
         "💡 <i>Чек-ины, прохождение психологических тестов и просмотр графиков остаются полностью бесплатными и безлимитными!</i>"
     ),
     "kz": (
-        "⏳ <b>Бүгінгі күнге арналған AI хабарламаларының лимиті бітті</b>\n\n"
+        "⏳ <b>Бүгінгі күнге арналған тегін AI хабарламаларының лимиті бітті</b>\n\n"
         f"Сіз бүгінгі {DAILY_FREE_AI_LIMIT} тегін AI сұрауын толық пайдаландыңыз. "
         "Лимит ертең таңертең жаңарады.\n\n"
+        "⭐ <b>Шектеусіз пайдаланғыңыз келе ме?</b>\n"
+        "<b>MindCheck Pro</b> тарифіне өтіңіз — /premium командасы\n\n"
         "💡 <i>Күнделікті чек-индер, тесттерден өту және графиктерді көру толықтай тегін әрі шектеусіз қала береді!</i>"
     ),
     "en": (
-        "⏳ <b>Daily AI message limit reached</b>\n\n"
+        "⏳ <b>Daily free AI message limit reached</b>\n\n"
         f"You've used all {DAILY_FREE_AI_LIMIT} free AI requests for today. "
         "Your quota will reset tomorrow morning.\n\n"
+        "⭐ <b>Want unlimited AI conversations?</b>\n"
+        "Upgrade to <b>MindCheck Pro</b> — command /premium\n\n"
         "💡 <i>Check-ins, psychological tests, and mood charts remain 100% free and unlimited!</i>"
     ),
 }
@@ -35,7 +41,7 @@ _LIMIT_EXCEEDED_MESSAGES = {
 async def check_and_increment_ai_quota(telegram_id: int) -> tuple[bool, int]:
     """
     Проверяет, не превысил ли пользователь дневной лимит AI-запросов.
-    Если лимит не исчерпан, инкрементирует счетчик.
+    Проверяет валидность Premium-подписки (срок действия premium_until).
     
     Возвращает:
         (allowed: bool, remaining: int)
@@ -49,11 +55,26 @@ async def check_and_increment_ai_quota(telegram_id: int) -> tuple[bool, int]:
         if not user:
             return True, DAILY_FREE_AI_LIMIT
 
-        # Премиум-пользователи имеют безлимитный доступ
-        if getattr(user, "is_premium", False):
-            return True, 9999
-
         now = datetime.utcnow()
+
+        # Проверка срока действия Premium
+        if getattr(user, "is_premium", False):
+            if user.premium_until and user.premium_until < now:
+                user.is_premium = False
+                await session.commit()
+            else:
+                # Премиум активен (лимит 150 в день для защиты от атак)
+                last_req = user.last_ai_request_date
+                if not last_req or last_req.date() < now.date():
+                    user.daily_ai_count = 0
+                if (user.daily_ai_count or 0) >= 150:
+                    return False, 0
+                user.daily_ai_count = (user.daily_ai_count or 0) + 1
+                user.last_ai_request_date = now
+                await session.commit()
+                return True, 150 - user.daily_ai_count
+
+        # Бесплатный тариф
         last_req = user.last_ai_request_date
 
         # Сброс счетчика, если наступил новый день (по UTC)

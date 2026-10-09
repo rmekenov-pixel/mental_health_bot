@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.types import TelegramObject
 from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import BOT_TOKEN
-from bot.handlers import start, tests, history, checkin, charts, feedback, admin, calendar, language
+from bot.handlers import start, tests, history, checkin, charts, feedback, admin, calendar, language, premium
 from bot.services.reminders import setup_scheduler
 from bot.services.localization import load_locale
 from database.db import init_db
@@ -64,6 +64,7 @@ async def main():
     dp.include_router(admin.router)
     dp.include_router(calendar.router)
     dp.include_router(language.router)
+    dp.include_router(premium.router)
 
     from bot.handlers import chat
     dp.include_router(chat.router)
