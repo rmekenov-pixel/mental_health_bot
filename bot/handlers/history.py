@@ -1,3 +1,5 @@
+import html
+import logging
 from aiogram import Router, F
 from aiogram.types import Message
 from database.db import AsyncSessionLocal
@@ -5,7 +7,6 @@ from database.models import TestResult
 from sqlalchemy import select
 from bot.keyboards.test_kb import get_main_keyboard
 from bot.services.localization import t, get_user_lang
-import logging
 from bot.services.insights import get_correlation_insights
 
 router = Router()
@@ -40,7 +41,8 @@ async def show_history(message: Message):
 
     except Exception as e:
         logging.error(f"History error: {e}")
-        await message.answer(f"Ошибка: {str(e)}", reply_markup=get_main_keyboard(lang))
+        safe_err = html.escape(str(e))
+        await message.answer(f"Ошибка при получении истории: {safe_err}", reply_markup=get_main_keyboard(lang))
 
 
 

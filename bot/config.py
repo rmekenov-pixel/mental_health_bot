@@ -43,3 +43,6 @@ GEMINI_API_KEY = _find_env(
 
 # Лимиты для бесплатного тарифа
 DAILY_FREE_AI_LIMIT = int(_find_env("DAILY_FREE_AI_LIMIT") or 25)
+
+# Администратор бота
+ADMIN_ID = int(_find_env("ADMIN_ID", "ADMIN_TELEGRAM_ID") or 342498582)

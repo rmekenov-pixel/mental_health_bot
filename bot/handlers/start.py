@@ -1,15 +1,17 @@
+import html
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from database.db import AsyncSessionLocal
-from database.models import User
-from sqlalchemy import select
+from database.models import User, TestResult, CheckIn, UserStreak, Feedback
+from sqlalchemy import select, delete
 from bot.keyboards.test_kb import get_main_keyboard
 from bot.states.test_states import ReminderStates
 from bot.services.localization import t, get_user_lang
 from bot.handlers.language import get_language_keyboard, LANG_MAP
 from bot.services.ai_explanation import test_ai_connection
+from bot.config import ADMIN_ID
 
 router = Router()
 
@@ -39,8 +41,9 @@ async def cmd_start(message: Message, state: FSMContext):
             )
         else:
             lang = user.language or "ru"
+            safe_name = html.escape(message.from_user.first_name or "")
             await message.answer(
-                t(lang, "start_existing", name=message.from_user.first_name),
+                t(lang, "start_existing", name=safe_name),
                 reply_markup=get_main_keyboard(lang),
                 parse_mode="HTML"
             )
@@ -110,7 +113,10 @@ async def cmd_help(message: Message):
 
 @router.message(Command("ai_status"))
 async def cmd_ai_status(message: Message):
-    """Диагностическая команда проверки AI подключения."""
+    """Диагностическая команда проверки AI подключения (только для администратора)."""
+    if message.from_user.id != ADMIN_ID:
+        return
+
     msg = await message.answer("🔄 Проверяю подключение к AI провайдерам...")
     diag = await test_ai_connection()
 
@@ -126,3 +132,77 @@ async def cmd_ai_status(message: Message):
         f"📋 <i>Переменные, видимые в контейнере:</i>\n<code>{diag['detected_env_names']}</code>"
     )
     await msg.edit_text(text, parse_mode="HTML")
+
+
+@router.message(Command("delete_my_data"))
+async def cmd_delete_my_data(message: Message):
+    """Команда полного удаления данных пользователя (GDPR / Право на забвение)."""
+    lang = await get_user_lang(message.from_user.id)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🗑 Да, удалить все данные", callback_data="confirm_delete_data"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_delete_data"),
+        ]
+    ])
+    warning_text = (
+        "⚠️ <b>Внимание: удаление всех ваших данных</b>\n\n"
+        "Это действие безвозвратно удалит:\n"
+        "• Всю историю прохождения психологических тестов\n"
+        "• Все ежедневные чек-ины и график динамики\n"
+        "• Данные стриков и персональные настройки\n\n"
+        "Вы уверены, что хотите полностью стереть историю?"
+    )
+    if lang == "kz":
+        warning_text = (
+            "⚠️ <b>Назар аударыңыз: барлық деректерді өшіру</b>\n\n"
+            "Бұл әрекет сіздің барлық деректеріңізді (тест нәтижелері, чек-индер, күнтізбе және тарих) біржола өшіреді.\n\n"
+            "Барлық деректерді өшіруге сенімдісіз бе?"
+        )
+    elif lang == "en":
+        warning_text = (
+            "⚠️ <b>Warning: Complete data erasure</b>\n\n"
+            "This action will permanently delete:\n"
+            "• All test results\n"
+            "• All daily check-ins and mood charts\n"
+            "• Your streaks and personalized settings\n\n"
+            "Are you sure you want to permanently delete your data?"
+        )
+
+    await message.answer(warning_text, parse_mode="HTML", reply_markup=kb)
+
+
+@router.callback_query(F.data == "confirm_delete_data")
+async def confirm_delete_data(callback: CallbackQuery, state: FSMContext):
+    telegram_id = callback.from_user.id
+    lang = await get_user_lang(telegram_id)
+
+    await state.clear()
+    async with AsyncSessionLocal() as session:
+        await session.execute(delete(TestResult).where(TestResult.telegram_id == telegram_id))
+        await session.execute(delete(CheckIn).where(CheckIn.telegram_id == telegram_id))
+        await session.execute(delete(UserStreak).where(UserStreak.telegram_id == telegram_id))
+        await session.execute(delete(Feedback).where(Feedback.telegram_id == telegram_id))
+        await session.execute(delete(User).where(User.telegram_id == telegram_id))
+        await session.commit()
+
+    done_msg = "🗑 <b>Все ваши данные успешно и безвозвратно удалены.</b>\n\nЧтобы начать заново, отправьте /start."
+    if lang == "kz":
+        done_msg = "🗑 <b>Барлық деректеріңіз сәтті өшірілді.</b>\n\nҚайта бастау үшін /start жіберіңіз."
+    elif lang == "en":
+        done_msg = "🗑 <b>All your data has been permanently erased.</b>\n\nSend /start to begin anew."
+
+    await callback.message.edit_text(done_msg, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "cancel_delete_data")
+async def cancel_delete_data(callback: CallbackQuery):
+    lang = await get_user_lang(callback.from_user.id)
+    cancel_msg = "Операция отменена. Ваши данные в безопасности."
+    if lang == "kz":
+        cancel_msg = "Әрекет тоқтатылды. Деректеріңіз қауіпсіз сақталды."
+    elif lang == "en":
+        cancel_msg = "Operation cancelled. Your data remains safe."
+
+    await callback.message.edit_text(cancel_msg)
+    await callback.answer()

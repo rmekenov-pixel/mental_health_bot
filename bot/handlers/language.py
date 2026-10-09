@@ -1,3 +1,4 @@
+import html
 from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
@@ -56,9 +57,10 @@ async def set_language(message: Message, state: FSMContext):
     from bot.keyboards.test_kb import get_main_keyboard
     from bot.states.test_states import ReminderStates
 
+    safe_name = html.escape(message.from_user.first_name or "")
     await message.answer(
         t(lang, "start_new" if is_new_user else "start_existing", 
-          name=message.from_user.first_name),
+          name=safe_name),
         parse_mode="HTML",
         reply_markup=get_main_keyboard(lang)
     )
