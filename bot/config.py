@@ -26,7 +26,12 @@ def _find_env(*names, contains_keyword=None) -> str:
 
     return None
 
-BOT_TOKEN = _find_env("BOT_TOKEN", "TELEGRAM_BOT_TOKEN", "TOKEN", contains_keyword="token")
+BOT_TOKEN = _find_env(
+    "BOT_TOKEN",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_TOKEN",
+    "TOKEN",
+)
 DATABASE_URL = _find_env("DATABASE_URL") or "sqlite:///./mental_health.db"
 
 # AI Провайдеры
@@ -44,5 +49,6 @@ GEMINI_API_KEY = _find_env(
 # Лимиты для бесплатного тарифа
 DAILY_FREE_AI_LIMIT = int(_find_env("DAILY_FREE_AI_LIMIT") or 25)
 
-# Администратор бота
-ADMIN_ID = int(_find_env("ADMIN_ID", "ADMIN_TELEGRAM_ID") or 342498582)
+# Администратор бота: задаётся переменной ADMIN_ID, иначе админ-команды
+# недоступны ни у кого (0 — несуществующий id).
+ADMIN_ID = int(_find_env("ADMIN_ID", "ADMIN_TELEGRAM_ID") or 0)

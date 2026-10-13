@@ -2,12 +2,12 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.types import TelegramObject
-from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import BOT_TOKEN
 from bot.handlers import start, tests, history, checkin, charts, feedback, admin, calendar, language, premium
 from bot.services.reminders import setup_scheduler
 from bot.services.localization import load_locale
-from database.db import init_db
+from database.db import AsyncSessionLocal, init_db
+from database.fsm_storage import DatabaseStorage
 from typing import Callable, Dict, Any, Awaitable
 
 logging.basicConfig(level=logging.INFO)
@@ -51,7 +51,7 @@ async def main():
     await init_db()
 
     bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=DatabaseStorage(AsyncSessionLocal))
 
     dp.message.middleware(ResetStateMiddleware())
 

@@ -191,9 +191,9 @@ async def _call_gemini_native(messages: list, max_tokens: int = 2500, temperatur
     last_err = "Unknown error"
 
     for model in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
+        # Ключ только в заголовке: в URL он попадает в логи прокси и истории запросов
         urls = [
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         ]
         for url in urls:
             try:

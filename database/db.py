@@ -3,20 +3,24 @@ from sqlalchemy.orm import sessionmaker
 from bot.config import DATABASE_URL
 from database.models import Base
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 
-# Корректная обработка префиксов для async SQLAlchemy
-if DATABASE_URL.startswith("sqlite"):
-    ASYNC_DATABASE_URL = DATABASE_URL.replace("sqlite://", "sqlite+aiosqlite://")
-elif DATABASE_URL.startswith("postgres://"):
-    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
-else:
-    ASYNC_DATABASE_URL = DATABASE_URL
+ASYNC_DRIVERS = {
+    "sqlite": "sqlite+aiosqlite",
+    "postgres": "postgresql+asyncpg",
+    "postgresql": "postgresql+asyncpg",
+}
+
+engine_url = make_url(DATABASE_URL)
+dialect = engine_url.drivername.split("+")[0]
+if dialect in ASYNC_DRIVERS:
+    engine_url = engine_url.set(drivername=ASYNC_DRIVERS[dialect])
 
 engine_kwargs = {"echo": False}
-if ASYNC_DATABASE_URL.startswith("sqlite"):
+if dialect == "sqlite":
     engine_kwargs["connect_args"] = {"timeout": 20}
 
-engine = create_async_engine(ASYNC_DATABASE_URL, **engine_kwargs)
+engine = create_async_engine(engine_url, **engine_kwargs)
 
 AsyncSessionLocal = sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
@@ -37,7 +41,7 @@ async def init_db():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ai_request_date TIMESTAMP",
     ]
 
-    is_sqlite = ASYNC_DATABASE_URL.startswith("sqlite")
+    is_sqlite = dialect == "sqlite"
     for migration in migrations:
         sql = migration.replace("IF NOT EXISTS ", "") if is_sqlite else migration
         try:

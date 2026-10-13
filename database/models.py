@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, BigInteger, Boolean, Index
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, BigInteger, Boolean, Index
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
 
@@ -65,3 +65,13 @@ class Feedback(Base):
     rating = Column(String, nullable=False)  # "positive" или "negative"
     comment = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FsmState(Base):
+    """Состояния диалогов (анкета, чек-ин) — чтобы не терялись при рестарте."""
+
+    __tablename__ = "fsm_states"
+
+    key = Column(String(255), primary_key=True)
+    state = Column(String, nullable=True)
+    data = Column(Text, nullable=True)

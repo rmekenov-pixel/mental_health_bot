@@ -157,7 +157,8 @@ async def handle_free_text(message: Message, state: FSMContext):
 
     # 1. SAFETY: Перехват кризисов
     if is_crisis_text(message.text):
-        logger.warning(f"CRISIS TRIGGER DETECTED for user {message.from_user.id}: {message.text[:50]}")
+        # Только факт срабатывания: текст обращения в кризисе не должен попасть в логи
+        logger.warning("CRISIS TRIGGER DETECTED for user %s", message.from_user.id)
         await message.answer(get_crisis_message(lang), parse_mode="HTML")
         return
 
